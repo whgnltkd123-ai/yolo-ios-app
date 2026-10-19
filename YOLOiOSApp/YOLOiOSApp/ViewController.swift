@@ -58,11 +58,12 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private var loadingOverlayView: UIView?
 
-  // MARK: - Optional drone alert (the original YOLO inference/camera remains unchanged)
+  // MARK: - Bird-versus-drone alert (YOLO inference and camera are unchanged)
   private let droneAlertButton = UIButton(type: .system)
   private let droneAlertStatusLabel = UILabel()
   private var droneAlertEnabled = true
   private var consecutiveDroneFrames = 0
+  private var previousDroneBox: CGRect?
   private var lastDroneAlertTime: Date?
   private let droneAlertCooldown: TimeInterval = 10
   private let requiredConsecutiveDroneFrames = 3
@@ -82,7 +83,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     droneAlertButton.addTarget(self, action: #selector(toggleDroneAlert), for: .touchUpInside)
     updateDroneAlertButton()
 
-    droneAlertStatusLabel.text = "드론 탐지 모델 확인 중"
+    droneAlertStatusLabel.text = "새·드론 분류 모델 확인 중"
     droneAlertStatusLabel.textColor = .white
     droneAlertStatusLabel.font = .systemFont(ofSize: 12, weight: .medium)
     droneAlertStatusLabel.backgroundColor = UIColor.black.withAlphaComponent(0.76)
@@ -103,57 +104,96 @@ class ViewController: UIViewController, YOLOViewDelegate {
     droneAlertButton.accessibilityLabel = droneAlertEnabled ? "드론 경보 끄기" : "드론 경보 켜기"
   }
 
-  @objc private func toggleDroneAlert() {
-    droneAlertEnabled.toggle()
+  private func resetDroneCandidate() {
     consecutiveDroneFrames = 0
-    updateDroneAlertButton()
-    droneAlertStatusLabel.text = droneAlertEnabled ? "드론 탐지 모델 확인 중" : "경보 꺼짐"
+    previousDroneBox = nil
   }
 
-  /// Match dedicated drone labels only. Do not treat birds, planes, clouds, or all moving objects as drones.
+  @objc private func toggleDroneAlert() {
+    droneAlertEnabled.toggle()
+    resetDroneCandidate()
+    updateDroneAlertButton()
+    droneAlertStatusLabel.text = droneAlertEnabled ? "새·드론 분류 모델 확인 중" : "경보 꺼짐"
+  }
+
+  private func isBirdClass(_ value: String) -> Bool {
+    ["bird", "birds"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+  }
+
+  /// A drone-only model cannot be trusted to distinguish a bird from a drone.
   private func isDroneClass(_ value: String) -> Bool {
     let label = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let exactClasses: Set<String> = [
+    let droneClasses: Set<String> = [
       "drone", "drones", "uav", "uas", "quadcopter", "multicopter",
-      "fpv drone", "fpv-drone", "unmanned aerial vehicle",
-      // Fixed-wing is a drone label only in the selected dedicated two-class model.
-      "fixed-wing", "fixed wing",
+      "fpv drone", "fpv-drone", "unmanned aerial vehicle", "fixed-wing", "fixed wing",
     ]
-    return exactClasses.contains(label) || label.hasPrefix("drone ") || label.hasSuffix(" drone")
+    return droneClasses.contains(label) || label.hasPrefix("drone ") || label.hasSuffix(" drone")
+  }
+
+  private func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+    let area = max(a.width * a.height + b.width * b.height - a.intersection(b).width * a.intersection(b).height, 0)
+    guard area > 0 else { return false }
+    let intersection = a.intersection(b)
+    guard !intersection.isNull else { return false }
+    return intersection.width * intersection.height / area >= 0.30
+  }
+
+  private func matchesPreviousDrone(_ rect: CGRect) -> Bool {
+    guard let previous = previousDroneBox else { return false }
+    let dx = rect.midX - previous.midX
+    let dy = rect.midY - previous.midY
+    return (dx * dx + dy * dy) <= (0.18 * 0.18) || overlaps(rect, previous)
   }
 
   private func processDroneAlert(result: YOLOResult) {
     guard droneAlertEnabled else { return }
     guard currentTask == "Detect" else {
-      consecutiveDroneFrames = 0
+      resetDroneCandidate()
       droneAlertStatusLabel.text = "Detect 모델을 선택하세요"
       return
     }
-    guard result.names.contains(where: isDroneClass) else {
-      consecutiveDroneFrames = 0
-      droneAlertStatusLabel.text = "드론 전용 클래스가 없는 모델"
+
+    // Do not arm audible alerts with drone-only or general-purpose models.
+    guard result.names.contains(where: isBirdClass),
+          result.names.contains(where: isDroneClass) else {
+      resetDroneCandidate()
+      droneAlertStatusLabel.text = "새·드론 동시 학습 모델이 필요함"
       return
     }
 
-    // Respect YOLO's confidence slider while requiring >= 60% for audible alerts.
-    let minimumConfidence = max(Float(yoloView.sliderConf.value), 0.60)
-    let bestConfidence = result.boxes
-      .filter { isDroneClass($0.cls) && $0.conf >= minimumConfidence }
-      .map(\.conf).max()
+    let threshold = max(Float(yoloView.sliderConf.value), 0.60)
+    let birds = result.boxes.filter { isBirdClass($0.cls) && $0.conf >= 0.45 }
+    let candidates = result.boxes
+      .filter { isDroneClass($0.cls) && $0.conf >= threshold }
+      .filter { candidate in
+        !birds.contains(where: { bird in
+          bird.conf >= candidate.conf * 0.80 && overlaps(bird.xywhn, candidate.xywhn)
+        })
+      }
+    let best = candidates.max(by: { $0.conf < $1.conf })
 
-    guard let confidence = bestConfidence else {
-      consecutiveDroneFrames = 0
-      droneAlertStatusLabel.text = "드론 감시 중"
+    guard let candidate = best else {
+      resetDroneCandidate()
+      if let bird = birds.max(by: { $0.conf < $1.conf }) {
+        droneAlertStatusLabel.text = String(format: "🐦 새 탐지 %.0f%% · 경보 없음", bird.conf * 100)
+      } else if result.boxes.contains(where: { isDroneClass($0.cls) || isBirdClass($0.cls) }) {
+        droneAlertStatusLabel.text = "🟡 미확인 · 신뢰도 부족"
+      } else {
+        droneAlertStatusLabel.text = "감시 중 · 탐지 대상 없음"
+      }
       return
     }
 
-    consecutiveDroneFrames = min(consecutiveDroneFrames + 1, requiredConsecutiveDroneFrames)
+    consecutiveDroneFrames = matchesPreviousDrone(candidate.xywhn)
+      ? min(consecutiveDroneFrames + 1, requiredConsecutiveDroneFrames) : 1
+    previousDroneBox = candidate.xywhn
+
     guard consecutiveDroneFrames >= requiredConsecutiveDroneFrames else {
-      droneAlertStatusLabel.text = "드론 후보 확인 중 (\(consecutiveDroneFrames)/\(requiredConsecutiveDroneFrames))"
+      droneAlertStatusLabel.text = "🟡 드론 후보 검증 중 (\(consecutiveDroneFrames)/\(requiredConsecutiveDroneFrames))"
       return
     }
 
-    droneAlertStatusLabel.text = String(format: "⚠️ 드론 후보 탐지 %.0f%%", confidence * 100)
+    droneAlertStatusLabel.text = String(format: "🚨 드론 후보 %.0f%%", candidate.conf * 100)
     let now = Date()
     guard lastDroneAlertTime.map({ now.timeIntervalSince($0) >= droneAlertCooldown }) ?? true
     else { return }
