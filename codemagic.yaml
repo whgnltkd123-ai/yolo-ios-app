@@ -39,3 +39,48 @@ workflows:
       - build/YOLOiOSApp-unsigned.ipa
       - build/DerivedData/Build/Products/Release-iphoneos/*.app
       - /tmp/xcodebuild_logs/*.log
+
+  bird-drone-prototype:
+    name: Bird vs Drone - Core ML Test (unsigned)
+    # Manual only: the pretrained checkpoint is third-party and the build uses
+    # additional macOS compute time. Do not attach production signing secrets.
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      xcode: latest
+      python: 3.11
+    scripts:
+      - name: Download, verify and convert pretrained 3-class YOLO
+        script: |
+          set -euo pipefail
+          python3 -m venv "$CM_BUILD_DIR/.bird-drone-venv"
+          source "$CM_BUILD_DIR/.bird-drone-venv/bin/activate"
+          python -m pip install --upgrade pip
+          python -m pip install "ultralytics>=8.3,<9" "coremltools>=8,<10" "numpy<2.4"
+          python tools/prepare_pretrained_bird_drone.py
+          test -d "YOLOiOSApp/Models/Detect/yolo8m-birddrone.mlpackage"
+      - name: Build original YOLO iOS engine with bird/drone test model
+        script: |
+          set -euo pipefail
+          xcodebuild \
+            -project "YOLOiOSApp/YOLOiOSApp.xcodeproj" \
+            -scheme "YOLOiOSApp" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$CM_BUILD_DIR/build/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Produce unsigned bird/drone prototype IPA
+        script: |
+          set -euo pipefail
+          APP="$CM_BUILD_DIR/build/DerivedData/Build/Products/Release-iphoneos/YOLOiOSApp.app"
+          test -d "$APP"
+          mkdir -p "$CM_BUILD_DIR/build/bird-drone-package/Payload"
+          cp -R "$APP" "$CM_BUILD_DIR/build/bird-drone-package/Payload/"
+          cd "$CM_BUILD_DIR/build/bird-drone-package"
+          /usr/bin/zip -qry "$CM_BUILD_DIR/build/YOLO-Bird-Drone-unsigned.ipa" Payload
+    artifacts:
+      - build/YOLO-Bird-Drone-unsigned.ipa
+      - build/DerivedData/Build/Products/Release-iphoneos/*.app
+      - /tmp/xcodebuild_logs/*.log
