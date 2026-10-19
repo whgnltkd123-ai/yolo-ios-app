@@ -26,6 +26,16 @@ workflows:
             -derivedDataPath "$CM_BUILD_DIR/build/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             build
+      - name: Create an unsigned IPA for Windows Sideloadly signing
+        script: |
+          set -euo pipefail
+          APP="$CM_BUILD_DIR/build/DerivedData/Build/Products/Release-iphoneos/YOLOiOSApp.app"
+          test -d "$APP"
+          mkdir -p "$CM_BUILD_DIR/build/unsigned-package/Payload"
+          cp -R "$APP" "$CM_BUILD_DIR/build/unsigned-package/Payload/"
+          cd "$CM_BUILD_DIR/build/unsigned-package"
+          /usr/bin/zip -qry "$CM_BUILD_DIR/build/YOLOiOSApp-unsigned.ipa" Payload
     artifacts:
+      - build/YOLOiOSApp-unsigned.ipa
       - build/DerivedData/Build/Products/Release-iphoneos/*.app
       - /tmp/xcodebuild_logs/*.log
