@@ -1,0 +1,23 @@
+workflows:
+  ios-build-check:
+    name: YOLO iOS Build Check (unsigned)
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      xcode: latest
+    scripts:
+      - name: Build the original YOLO iOS app (unsigned)
+        script: |
+          set -euo pipefail
+          xcodebuild \
+            -project "YOLOiOSApp/YOLOiOSApp.xcodeproj" \
+            -scheme "YOLOiOSApp" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$CM_BUILD_DIR/build/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+    artifacts:
+      - build/DerivedData/Build/Products/Release-iphoneos/*.app
+      - /tmp/xcodebuild_logs/*.log
