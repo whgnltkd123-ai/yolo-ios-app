@@ -48,12 +48,12 @@ workflows:
     max_build_duration: 120
     environment:
       xcode: latest
-      python: 3.11
     scripts:
       - name: Download, verify and convert pretrained 3-class YOLO
         script: |
           set -euo pipefail
-          python3 -m venv "$CM_BUILD_DIR/.bird-drone-venv"
+          PYTHON="$(command -v python3.11 || command -v python3)"
+          "$PYTHON" -m venv "$CM_BUILD_DIR/.bird-drone-venv"
           source "$CM_BUILD_DIR/.bird-drone-venv/bin/activate"
           python -m pip install --upgrade pip
           python -m pip install "ultralytics>=8.3,<9" "coremltools>=8,<10" "numpy<2.4"
