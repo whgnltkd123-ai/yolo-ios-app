@@ -382,7 +382,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 0;
 				INFOPLIST_FILE = YOLOiOSApp/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Ultralytics YOLO";
+				INFOPLIST_KEY_CFBundleDisplayName = "YOLO Drone Alert";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -390,7 +390,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 8.9.16;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ultralytics.iDetection;
+				PRODUCT_BUNDLE_IDENTIFIER = com.whgnltkd123ai.yolodronealert;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -409,7 +409,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 0;
 				INFOPLIST_FILE = YOLOiOSApp/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Ultralytics YOLO";
+				INFOPLIST_KEY_CFBundleDisplayName = "YOLO Drone Alert";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -417,7 +417,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 8.9.16;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ultralytics.iDetection;
+				PRODUCT_BUNDLE_IDENTIFIER = com.whgnltkd123ai.yolodronealert;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
