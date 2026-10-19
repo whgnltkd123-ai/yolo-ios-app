@@ -541,8 +541,23 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     frame: CGRect,
     angle: CGFloat? = nil
   ) {
-    let color = ultralyticsColors[classIndex % ultralyticsColors.count]
-    let label = DetectionLabelStyle.text(className: className, confidence: confidence)
+    // Bird/drone separation is visible immediately; all other classes retain original YOLO colors.
+    let normalizedClass = className.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let birdClasses: Set<String> = ["bird", "birds"]
+    let droneClasses: Set<String> = [
+      "drone", "drones", "uav", "uas", "quadcopter", "multicopter",
+      "fpv drone", "fpv-drone", "unmanned aerial vehicle", "fixed-wing", "fixed wing",
+    ]
+    let isDroneLabel = droneClasses.contains(normalizedClass)
+      || normalizedClass.hasPrefix("drone ") || normalizedClass.hasSuffix(" drone")
+    let color: UIColor = birdClasses.contains(normalizedClass)
+      ? .systemGreen
+      : isDroneLabel
+        ? (confidence >= 0.60 ? .systemRed : .systemYellow)
+        : ultralyticsColors[classIndex % ultralyticsColors.count]
+    let localizedClass = birdClasses.contains(normalizedClass) ? "새"
+      : isDroneLabel ? "드론 후보" : className
+    let label = DetectionLabelStyle.text(className: localizedClass, confidence: confidence)
     let alpha = DetectionLabelStyle.alpha(confidence: confidence)
     boundingBoxViews[index].show(
       frame: frame, label: label, color: color, alpha: alpha, angle: angle)
