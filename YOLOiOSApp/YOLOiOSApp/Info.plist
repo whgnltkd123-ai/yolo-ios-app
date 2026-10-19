@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Ultralytics YOLO</string>
+	<string>YOLO Drone Alert</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -27,7 +27,7 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Ultralytics YOLO uses your camera to detect objects around you and display results in realtime on your screen 🚀</string>
+	<string>YOLO Drone Alert uses the camera for on-device object detection and drone-class alerts.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>To save results to Photo Library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
