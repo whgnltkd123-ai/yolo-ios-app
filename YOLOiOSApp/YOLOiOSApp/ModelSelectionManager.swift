@@ -34,13 +34,12 @@ struct ModelSelectionManager {
         if let char = sizeChar,
           let size = ModelSize(rawValue: String(char))
         {
-          // Prefer a bundled experimental bird/drone model in the 'n' position.
-          // It is only present in the dedicated drone-model Codemagic workflow.
-          // The official nano model remains available in normal builds.
-          let isDroneModel = baseName == "yolo8n-birddrone"
-          let selectedIsDrone = standardModels[size]?.name.lowercased()
-            .hasPrefix("yolo8n-birddrone") ?? false
-          if size == .n && selectedIsDrone && !isDroneModel {
+          // The optional 3-class pretrained model is bigger than nano (about 52MB).
+          // Give it the 'm' slot and do not overwrite it with the stock YOLO26m.
+          let isBirdDroneModel = baseName == "yolo8m-birddrone"
+          let previouslySelected = standardModels[size]?.name.lowercased()
+            .hasPrefix("yolo8m-birddrone") ?? false
+          if size == .m && previouslySelected && !isBirdDroneModel {
             continue
           }
           standardModels[size] = ModelInfo(
