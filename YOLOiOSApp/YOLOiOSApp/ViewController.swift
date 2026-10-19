@@ -407,9 +407,16 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private func reloadModelEntriesAndLoadFirst(for taskName: String) {
     showModelEntries(for: taskName)
 
-    if let firstSize = ModelSelectionManager.ModelSize.allCases.first,
-      let model = standardModels[firstSize]
+    // In the optional bird/drone prototype build, pick the 3-class model first.
+    // Regular unsigned builds still select the original nano model.
+    let preferredSize: ModelSelectionManager.ModelSize =
+      (taskName == "Detect"
+        && standardModels[.m]?.name.lowercased().hasPrefix("yolo8m-birddrone") == true)
+      ? .m : .n
+    if let model = standardModels[preferredSize]
     {
+      modelSegmentedControl.selectedSegmentIndex =
+        ModelSelectionManager.ModelSize.allCases.firstIndex(of: preferredSize) ?? 0
       let entry = ModelEntry(
         displayName: (model.name as NSString).deletingPathExtension,
         identifier: model.name,
