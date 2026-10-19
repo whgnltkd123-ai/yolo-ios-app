@@ -58,6 +58,110 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private var loadingOverlayView: UIView?
 
+  // MARK: - Optional drone alert (the original YOLO inference/camera remains unchanged)
+  private let droneAlertButton = UIButton(type: .system)
+  private let droneAlertStatusLabel = UILabel()
+  private var droneAlertEnabled = true
+  private var consecutiveDroneFrames = 0
+  private var lastDroneAlertTime: Date?
+  private let droneAlertCooldown: TimeInterval = 10
+  private let requiredConsecutiveDroneFrames = 3
+
+  private func installDroneAlertControls() {
+    let panel = UIStackView(arrangedSubviews: [droneAlertButton, droneAlertStatusLabel])
+    panel.axis = .vertical
+    panel.alignment = .leading
+    panel.spacing = 5
+    panel.translatesAutoresizingMaskIntoConstraints = false
+
+    droneAlertButton.backgroundColor = UIColor.black.withAlphaComponent(0.76)
+    droneAlertButton.setTitleColor(.white, for: .normal)
+    droneAlertButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+    droneAlertButton.layer.cornerRadius = 8
+    droneAlertButton.contentEdgeInsets = UIEdgeInsets(top: 7, left: 10, bottom: 7, right: 10)
+    droneAlertButton.addTarget(self, action: #selector(toggleDroneAlert), for: .touchUpInside)
+    updateDroneAlertButton()
+
+    droneAlertStatusLabel.text = "드론 탐지 모델 확인 중"
+    droneAlertStatusLabel.textColor = .white
+    droneAlertStatusLabel.font = .systemFont(ofSize: 12, weight: .medium)
+    droneAlertStatusLabel.backgroundColor = UIColor.black.withAlphaComponent(0.76)
+    droneAlertStatusLabel.layer.cornerRadius = 6
+    droneAlertStatusLabel.clipsToBounds = true
+    droneAlertStatusLabel.numberOfLines = 2
+
+    yoloView.addSubview(panel)
+    NSLayoutConstraint.activate([
+      panel.leadingAnchor.constraint(equalTo: yoloView.leadingAnchor, constant: 12),
+      panel.topAnchor.constraint(equalTo: yoloView.safeAreaLayoutGuide.topAnchor, constant: 12),
+      panel.widthAnchor.constraint(lessThanOrEqualTo: yoloView.widthAnchor, multiplier: 0.84),
+    ])
+  }
+
+  private func updateDroneAlertButton() {
+    droneAlertButton.setTitle(droneAlertEnabled ? "🚨 드론 경보 ON" : "🔕 드론 경보 OFF", for: .normal)
+    droneAlertButton.accessibilityLabel = droneAlertEnabled ? "드론 경보 끄기" : "드론 경보 켜기"
+  }
+
+  @objc private func toggleDroneAlert() {
+    droneAlertEnabled.toggle()
+    consecutiveDroneFrames = 0
+    updateDroneAlertButton()
+    droneAlertStatusLabel.text = droneAlertEnabled ? "드론 탐지 모델 확인 중" : "경보 꺼짐"
+  }
+
+  /// Match dedicated drone labels only. Do not treat birds, planes, clouds, or all moving objects as drones.
+  private func isDroneClass(_ value: String) -> Bool {
+    let label = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let exactClasses: Set<String> = [
+      "drone", "drones", "uav", "uas", "quadcopter", "multicopter",
+      "fpv drone", "fpv-drone", "unmanned aerial vehicle",
+    ]
+    return exactClasses.contains(label) || label.hasPrefix("drone ") || label.hasSuffix(" drone")
+  }
+
+  private func processDroneAlert(result: YOLOResult) {
+    guard droneAlertEnabled else { return }
+    guard currentTask == "Detect" else {
+      consecutiveDroneFrames = 0
+      droneAlertStatusLabel.text = "Detect 모델을 선택하세요"
+      return
+    }
+    guard result.names.contains(where: isDroneClass) else {
+      consecutiveDroneFrames = 0
+      droneAlertStatusLabel.text = "드론 전용 클래스가 없는 모델"
+      return
+    }
+
+    // Respect YOLO's confidence slider while requiring >= 60% for audible alerts.
+    let minimumConfidence = max(Float(yoloView.sliderConf.value), 0.60)
+    let bestConfidence = result.boxes
+      .filter { isDroneClass($0.cls) && $0.conf >= minimumConfidence }
+      .map(\.conf).max()
+
+    guard let confidence = bestConfidence else {
+      consecutiveDroneFrames = 0
+      droneAlertStatusLabel.text = "드론 감시 중"
+      return
+    }
+
+    consecutiveDroneFrames = min(consecutiveDroneFrames + 1, requiredConsecutiveDroneFrames)
+    guard consecutiveDroneFrames >= requiredConsecutiveDroneFrames else {
+      droneAlertStatusLabel.text = "드론 후보 확인 중 (\(consecutiveDroneFrames)/\(requiredConsecutiveDroneFrames))"
+      return
+    }
+
+    droneAlertStatusLabel.text = String(format: "⚠️ 드론 후보 탐지 %.0f%%", confidence * 100)
+    let now = Date()
+    guard lastDroneAlertTime.map({ now.timeIntervalSince($0) >= droneAlertCooldown }) ?? true
+    else { return }
+    lastDroneAlertTime = now
+
+    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+    AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+    AudioServicesPlayAlertSound(SystemSoundID(1005))
+  }
+
   // MARK: - Constants
   private struct Constants {
     static let defaultTask = YOLOTask.detect
@@ -148,6 +252,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
       UITapGestureRecognizer(target: self, action: #selector(logoButton)))
     yoloView.shareButton.addTarget(self, action: #selector(shareButtonTapped), for: .touchUpInside)
     yoloView.delegate = self
+    installDroneAlertControls()
     [yoloView.labelName, yoloView.labelFPS, yoloView.labelBreakdown].forEach { $0?.isHidden = true }
 
     // Observe slider changes to forward thresholds to an external display.
@@ -733,6 +838,7 @@ extension ViewController {
     DispatchQueue.main.async { [weak self] in
       self?.breakdownText = text
       self?.renderPerformanceLabel()
+      self?.processDroneAlert(result: result)
     }
   }
 
