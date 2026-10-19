@@ -116,6 +116,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
     let exactClasses: Set<String> = [
       "drone", "drones", "uav", "uas", "quadcopter", "multicopter",
       "fpv drone", "fpv-drone", "unmanned aerial vehicle",
+      // Fixed-wing is a drone label only in the selected dedicated two-class model.
+      "fixed-wing", "fixed wing",
     ]
     return exactClasses.contains(label) || label.hasPrefix("drone ") || label.hasSuffix(" drone")
   }
