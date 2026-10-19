@@ -34,6 +34,15 @@ struct ModelSelectionManager {
         if let char = sizeChar,
           let size = ModelSize(rawValue: String(char))
         {
+          // Prefer the bundled experimental drone model in the 'n' position.
+          // It is only present in the dedicated drone-model Codemagic workflow.
+          // The official nano model remains available in normal builds.
+          let isDroneModel = baseName == "yolo26n-drone"
+          let selectedIsDrone = standardModels[size]?.name.lowercased()
+            .hasPrefix("yolo26n-drone") ?? false
+          if size == .n && selectedIsDrone && !isDroneModel {
+            continue
+          }
           standardModels[size] = ModelInfo(
             name: model.name,
             url: model.url,
