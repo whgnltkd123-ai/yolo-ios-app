@@ -49,7 +49,7 @@ workflows:
     environment:
       xcode: latest
     scripts:
-      - name: Download, verify and convert pretrained 3-class YOLO
+      - name: Download, verify and convert candidate 2-class bird/drone YOLO
         script: |
           set -euo pipefail
           PYTHON="$(command -v python3.11 || command -v python3)"
@@ -58,7 +58,7 @@ workflows:
           python -m pip install --upgrade pip
           python -m pip install "ultralytics>=8.3,<9" "coremltools>=8,<10" "numpy<2.4" "certifi>=2025.4"
           python tools/prepare_pretrained_bird_drone.py
-          test -d "YOLOiOSApp/Models/Detect/yolo8m-birddrone.mlpackage"
+          test -d "YOLOiOSApp/Models/Detect/yolo8s-birddrone.mlpackage"
       - name: Build original YOLO iOS engine with bird/drone test model
         script: |
           set -euo pipefail
