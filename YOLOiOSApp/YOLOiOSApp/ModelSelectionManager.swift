@@ -20,8 +20,8 @@ struct ModelSelectionManager {
   private static let modelSizeRegex = try! NSRegularExpression(
     pattern: "^\\d+([nsmxl])", options: [])
 
-  /// Preserve the fast official YOLO26n detector until a real verified 81-class
-  /// YOLO26n model has been bundled. Do not prefer old bird/drone YOLOv8 test models.
+  /// Prefer the aerial detector when bundled; otherwise retain the existing detector.
+  /// Do not prefer old bird/drone YOLOv8 test models.
   static func categorizeModels(from models: [(name: String, url: URL?, isLocal: Bool)])
     -> [ModelSize: ModelInfo]
   {
@@ -37,7 +37,8 @@ struct ModelSelectionManager {
 
       if size == .n {
         let priority: Int
-        if baseName == "yolo26n-drone81" { priority = 100 }
+        if baseName == "yolo26n-aerial3" { priority = 120 }
+        else if baseName == "yolo26n-drone81" { priority = 100 }
         else if baseName == "yolo26n" || baseName.hasPrefix("yolo26n.mlpackage") {
           priority = 80
         }

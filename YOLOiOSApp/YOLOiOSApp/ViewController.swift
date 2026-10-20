@@ -33,6 +33,11 @@ private final class DroneAlertSoundPlayer {
   private var currentPlayer: AVAudioPlayer?
   private var cachedTones: [Int: Data] = [:]
 
+  func stop() {
+    currentPlayer?.stop()
+    currentPlayer = nil
+  }
+
   func play(stage: Int) {
     guard (1...3).contains(stage) else { return }
     let wav = cachedTones[stage] ?? Self.makeTone(stage: stage)
@@ -179,7 +184,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     droneAlertButton.addTarget(self, action: #selector(toggleDroneAlert), for: .touchUpInside)
     updateDroneAlertButton()
 
-    droneAlertStatusLabel.text = "새·드론 모델을 확인하는 중"
+    droneAlertStatusLabel.text = "드론·새·비행기 모델을 확인하는 중"
     droneAlertStatusLabel.textColor = .white
     droneAlertStatusLabel.font = .systemFont(ofSize: 12, weight: .medium)
     droneAlertStatusLabel.backgroundColor = UIColor.black.withAlphaComponent(0.76)
@@ -223,13 +228,19 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   @objc private func toggleDroneAlert() {
     droneAlertEnabled.toggle()
+    if !droneAlertEnabled { droneAlertAudio.stop() }
     resetDroneCandidate()
     updateDroneAlertButton()
-    droneAlertStatusLabel.text = droneAlertEnabled ? "새·드론 모델 확인 중" : "경보 꺼짐"
+    droneAlertStatusLabel.text = droneAlertEnabled ? "드론·새·비행기 모델 확인 중" : "경보 꺼짐"
   }
 
   private func isBirdClass(_ value: String) -> Bool {
     ["bird", "birds"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+  }
+
+  private func isAirplaneClass(_ value: String) -> Bool {
+    ["airplane", "aeroplane", "plane"].contains(
+      value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
   }
 
   private func isDroneClass(_ value: String) -> Bool {
@@ -294,7 +305,9 @@ class ViewController: UIViewController, YOLOViewDelegate {
       return
     }
 
-    let birds = result.boxes.filter { isBirdClass($0.cls) && $0.conf >= 0.40 }
+    let otherAircraft = result.boxes.filter {
+      (isBirdClass($0.cls) || isAirplaneClass($0.cls)) && $0.conf >= 0.40
+    }
     let minimumConfidence = max(Float(yoloView.sliderConf.value), 0.30)
     let candidates = result.boxes
       .filter {
@@ -302,15 +315,17 @@ class ViewController: UIViewController, YOLOViewDelegate {
           && $0.xywhn.width >= 0.003 && $0.xywhn.height >= 0.003
       }
       .filter { candidate in
-        !birds.contains(where: { bird in
-          bird.conf >= candidate.conf * 0.75 && overlaps(bird.xywhn, candidate.xywhn)
+        !otherAircraft.contains(where: { other in
+          other.conf >= candidate.conf * 0.75 && overlaps(other.xywhn, candidate.xywhn)
         })
       }
 
     guard let candidate = candidates.max(by: { $0.conf < $1.conf }) else {
       resetDroneCandidate()
-      if let bird = birds.max(by: { $0.conf < $1.conf }) {
-        droneAlertStatusLabel.text = String(format: "🐦 새 후보 %.0f%% · 경보 없음", bird.conf * 100)
+      if let other = otherAircraft.max(by: { $0.conf < $1.conf }) {
+        let label = isBirdClass(other.cls) ? "🐦 새 후보" : "✈️ 비행기 후보"
+        droneAlertStatusLabel.text = String(
+          format: "%@ %.0f%% · 경보 없음", label, other.conf * 100)
       } else {
         droneAlertStatusLabel.text = "감시 중 · 확인된 드론 후보 없음"
       }
@@ -881,8 +896,10 @@ class ViewController: UIViewController, YOLOViewDelegate {
       if success {
         self.labelName.text = processString(modelName)
         self.resetDroneCandidate()
-        if modelName.lowercased().contains("birddrone") || modelName.lowercased().contains("drone81") {
-          // Experimental two-class model: retain modest-confidence candidates for temporal validation.
+        if modelName.lowercased().contains("birddrone")
+          || modelName.lowercased().contains("drone81")
+          || modelName.lowercased().contains("aerial3") {
+          // Retain modest-confidence candidates for temporal validation.
           self.yoloView.setConfidenceThreshold(0.30)
           self.yoloView.setNumItemsThreshold(30)
         }

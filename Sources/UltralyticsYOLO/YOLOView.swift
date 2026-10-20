@@ -484,8 +484,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   private func isAerialDetectionClass(_ label: String) -> Bool {
     let name = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     let aerialClasses: Set<String> = [
-      "bird", "birds", "airplane", "aeroplane", "aircraft", "plane",
-      "kite", "helicopter", "glider", "balloon", "hot air balloon",
+      "bird", "birds", "airplane", "aeroplane", "plane",
       "drone", "drones", "uav", "uas", "quadcopter", "hexacopter",
       "multicopter", "fpv drone", "fpv-drone", "fixed wing", "fixed-wing",
       "unmanned aerial vehicle",
@@ -495,7 +494,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
 
   func showBoxes(predictions: YOLOResult) {
     // Iterate directly without constructing a filtered array on every frame.
-    // Inference still evaluates all of the original YOLO26 COCO object classes.
+    // Inference still evaluates every class provided by the selected model.
     let isBirdDroneModel = modelName.lowercased().contains("birddrone") || modelName.lowercased().contains("drone81")
     let maxVisible = min(50, boundingBoxViews.count)
     let viewSize = bounds.size
@@ -585,6 +584,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     // Bird/drone separation is visible immediately; all other classes retain original YOLO colors.
     let normalizedClass = className.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     let birdClasses: Set<String> = ["bird", "birds"]
+    let airplaneClasses: Set<String> = ["airplane", "aeroplane", "plane"]
     let droneClasses: Set<String> = [
       "drone", "drones", "uav", "uas", "quadcopter", "multicopter",
       "fpv drone", "fpv-drone", "unmanned aerial vehicle", "fixed-wing", "fixed wing",
@@ -593,11 +593,13 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       || normalizedClass.hasPrefix("drone ") || normalizedClass.hasSuffix(" drone")
     let color: UIColor = birdClasses.contains(normalizedClass)
       ? .systemGreen
+      : airplaneClasses.contains(normalizedClass) ? .systemBlue
       : isDroneLabel
         ? (confidence >= 0.83 ? .systemRed : (confidence >= 0.60 ? .systemOrange : .systemYellow))
         : ultralyticsColors[classIndex % ultralyticsColors.count]
     // These are single-frame scores, not independently confirmed identities.
     let localizedClass = birdClasses.contains(normalizedClass) ? "새 후보"
+      : airplaneClasses.contains(normalizedClass) ? "비행기 후보"
       : isDroneLabel
         ? (confidence >= 0.83 ? "드론 고점수 후보" : (confidence >= 0.60 ? "드론 의심" : "미확인 물체"))
         : className
