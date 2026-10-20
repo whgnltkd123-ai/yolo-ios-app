@@ -17,6 +17,8 @@
 
 이 데이터셋은 `drone`에 대한 실제 박스가 들어 있으므로 81종 학습 후보로 적합합니다. 그러나 **COCO 80종 데이터가 포함된 건 아닙니다.** COCO 2017 80종의 YOLO 정답 라벨도 별도로 준비해야 합니다.
 
+**개발 경험 없이 진행하기 위한 [Colab 81종 학습 노트북](https://colab.research.google.com/github/whgnltkd123-ai/yolo-ios-app/blob/main/colab/YOLO26_81_Seraphim_Train.ipynb)도 추가했습니다.** 버튼으로 실행되지만 대용량 데이터 다운로드/훈련은 사용자의 GPU 런타임이 필요하며 무료 Colab 제한으로 중단될 수 있습니다. 실제 학습·검증을 실행하기 전에는 `best.pt`가 없습니다.
+
 ### Colab 또는 별도 GPU 학습 서버에서 드론 데이터 준비
 
 ```bash
