@@ -132,3 +132,49 @@ workflows:
       - build/YOLO26-Drone-Alert-unsigned.ipa
       - build/DerivedData/Build/Products/Release-iphoneos/*.app
       - /tmp/xcodebuild_logs/*.log
+
+  yolo26-81-class:
+    name: YOLO26 81 Classes - COCO80 + Drone (trained model required, unsigned)
+    # This Mac builder DOES NOT train; it verifies trained GPU weights and exports iOS.
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      xcode: latest
+    scripts:
+      - name: Verify trained 81-class model and export optimized Core ML
+        script: |
+          set -euo pipefail
+          : "\${YOLO26_81_CHECKPOINT_URL:?Set trained YOLO26n COCO80+drone HTTPS best.pt URL}"
+          : "\${YOLO26_81_CHECKPOINT_SHA256:?Set exact SHA256 of trained best.pt}"
+          PYTHON="$(command -v python3.11 || command -v python3)"
+          "$PYTHON" -m venv "$CM_BUILD_DIR/.yolo26-81-venv"
+          source "$CM_BUILD_DIR/.yolo26-81-venv/bin/activate"
+          python -m pip install --upgrade pip
+          python -m pip install "ultralytics>=8.4.142,<9" "coremltools>=9,<11" "numpy<2.4" "certifi>=2025.4" "pyyaml>=6"
+          python tools/import_trained_yolo26_81.py
+          test -f "YOLOiOSApp/Models/Detect/yolo26n-drone81.mlpackage/Manifest.json"
+      - name: Build native YOLO26 camera with true 81-class drone model
+        script: |
+          set -euo pipefail
+          xcodebuild \
+            -project "YOLOiOSApp/YOLOiOSApp.xcodeproj" \
+            -scheme "YOLOiOSApp" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$CM_BUILD_DIR/build/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Create unsigned COCO80 plus drone IPA
+        script: |
+          set -euo pipefail
+          APP="$CM_BUILD_DIR/build/DerivedData/Build/Products/Release-iphoneos/YOLOiOSApp.app"
+          test -d "$APP"
+          mkdir -p "$CM_BUILD_DIR/build/81-package/Payload"
+          cp -R "$APP" "$CM_BUILD_DIR/build/81-package/Payload/"
+          cd "$CM_BUILD_DIR/build/81-package"
+          /usr/bin/zip -qry "$CM_BUILD_DIR/build/YOLO26-Drone-81-unsigned.ipa" Payload
+    artifacts:
+      - build/YOLO26-Drone-81-unsigned.ipa
+      - build/DerivedData/Build/Products/Release-iphoneos/*.app
+      - /tmp/xcodebuild_logs/*.log
