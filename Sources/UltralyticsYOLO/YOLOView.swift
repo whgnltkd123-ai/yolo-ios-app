@@ -177,8 +177,6 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   private var maskLayer: CALayer?
   private var poseLayer: CALayer?
 
-  private let minimumZoom: CGFloat = 1.0
-  private let maximumZoom: CGFloat = 10.0
   private var lastZoomFactor: CGFloat = 1.0
   private var pausedShareImage: UIImage?
   private var pausedImageView: UIImageView?
@@ -568,7 +566,8 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       className: prediction.cls,
       confidence: CGFloat(prediction.conf),
       classIndex: prediction.index,
-      frame: frame
+      frame: frame,
+      smallTarget: min(prediction.xywhn.width, prediction.xywhn.height) < 0.02
     )
   }
 
@@ -579,6 +578,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     confidence: CGFloat,
     classIndex: Int,
     frame: CGRect,
+    smallTarget: Bool = false,
     angle: CGFloat? = nil
   ) {
     // Bird/drone separation is visible immediately; all other classes retain original YOLO colors.
@@ -591,14 +591,18 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     ]
     let isDroneLabel = droneClasses.contains(normalizedClass)
       || normalizedClass.hasPrefix("drone ") || normalizedClass.hasSuffix(" drone")
-    let color: UIColor = birdClasses.contains(normalizedClass)
+    let isUncertain = (birdClasses.contains(normalizedClass)
+      || airplaneClasses.contains(normalizedClass) || isDroneLabel)
+      && (confidence < 0.60 || smallTarget)
+    let color: UIColor = isUncertain ? .systemYellow : birdClasses.contains(normalizedClass)
       ? .systemGreen
       : airplaneClasses.contains(normalizedClass) ? .systemBlue
       : isDroneLabel
         ? (confidence >= 0.83 ? .systemRed : (confidence >= 0.60 ? .systemOrange : .systemYellow))
         : ultralyticsColors[classIndex % ultralyticsColors.count]
     // These are single-frame scores, not independently confirmed identities.
-    let localizedClass = birdClasses.contains(normalizedClass) ? "새 후보"
+    let localizedClass = isUncertain ? "미확인 물체"
+      : birdClasses.contains(normalizedClass) ? "새 후보"
       : airplaneClasses.contains(normalizedClass) ? "비행기 후보"
       : isDroneLabel
         ? (confidence >= 0.83 ? "드론 고점수 후보" : (confidence >= 0.60 ? "드론 의심" : "미확인 물체"))
@@ -1087,7 +1091,9 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
 
     // Return zoom value between the minimum and maximum zoom values
     func minMaxZoom(_ factor: CGFloat) -> CGFloat {
-      return min(min(max(factor, minimumZoom), maximumZoom), device.activeFormat.videoMaxZoomFactor)
+      return min(
+        max(factor, device.minAvailableVideoZoomFactor),
+        min(device.maxAvailableVideoZoomFactor, device.activeFormat.videoMaxZoomFactor))
     }
 
     func update(scale factor: CGFloat) {

@@ -157,6 +157,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var droneAlertEnabled = true
   private var droneCandidateFrames = 0
   private var previousDroneBox: CGRect?
+  private var previousCandidateClass: String?
   private var recentDroneConfidence: [Float] = []
   private var previousAlertStage: DroneAlertStage = .none
   private var lastAlertByStage: [DroneAlertStage: Date] = [:]
@@ -222,6 +223,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private func resetDroneCandidate() {
     droneCandidateFrames = 0
     previousDroneBox = nil
+    previousCandidateClass = nil
     recentDroneConfidence.removeAll(keepingCapacity: true)
     previousAlertStage = .none
   }
@@ -306,13 +308,15 @@ class ViewController: UIViewController, YOLOViewDelegate {
     }
 
     let otherAircraft = result.boxes.filter {
-      (isBirdClass($0.cls) || isAirplaneClass($0.cls)) && $0.conf >= 0.40
+      (isBirdClass($0.cls) || isAirplaneClass($0.cls)) && $0.conf >= 0.60
+        && min($0.xywhn.width, $0.xywhn.height) >= 0.02
     }
     let minimumConfidence = max(Float(yoloView.sliderConf.value), 0.30)
     let candidates = result.boxes
       .filter {
-        isDroneClass($0.cls) && $0.conf >= minimumConfidence
-          && $0.xywhn.width >= 0.003 && $0.xywhn.height >= 0.003
+        let isUncertainAerial = (isBirdClass($0.cls) || isAirplaneClass($0.cls))
+          && ($0.conf < 0.60 || min($0.xywhn.width, $0.xywhn.height) < 0.02)
+        return (isDroneClass($0.cls) || isUncertainAerial) && $0.conf >= minimumConfidence
       }
       .filter { candidate in
         !otherAircraft.contains(where: { other in
@@ -332,7 +336,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
       return
     }
 
-    if matchesPreviousDrone(candidate.xywhn) {
+    if matchesPreviousDrone(candidate.xywhn) && previousCandidateClass == candidate.cls {
       droneCandidateFrames = min(30, droneCandidateFrames + 1)
     } else {
       droneCandidateFrames = 1
@@ -340,6 +344,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
       previousAlertStage = .none
     }
     previousDroneBox = candidate.xywhn
+    previousCandidateClass = candidate.cls
     recentDroneConfidence.append(candidate.conf)
     if recentDroneConfidence.count > 8 { recentDroneConfidence.removeFirst() }
     let averageConfidence = recentDroneConfidence.reduce(Float(0), +)
@@ -348,13 +353,13 @@ class ViewController: UIViewController, YOLOViewDelegate {
     let hasResolvableShape = min(candidate.xywhn.width, candidate.xywhn.height) >= 0.02
 
     let stage: DroneAlertStage
-    if droneCandidateFrames >= 7 && averageConfidence >= 0.83
+    if isDroneClass(candidate.cls) && droneCandidateFrames >= 7 && averageConfidence >= 0.83
       && candidate.conf >= 0.78 && hasResolvableShape {
       stage = .high
       droneAlertStatusLabel.text = String(
         format: "🚨 드론 확신(모델 추정) %.0f%% · %d프레임", averageConfidence * 100, droneCandidateFrames)
-    } else if droneCandidateFrames >= 4 && averageConfidence >= 0.60
-      && candidate.conf >= 0.54 {
+    } else if isDroneClass(candidate.cls) && droneCandidateFrames >= 4 && averageConfidence >= 0.60
+      && candidate.conf >= 0.60 && hasResolvableShape {
       stage = .suspected
       droneAlertStatusLabel.text = String(
         format: "🟠 드론 의심 %.0f%% · %d프레임", averageConfidence * 100, droneCandidateFrames)
@@ -366,7 +371,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
     // Unknown objects only generate their quieter alarm after tracking across multiple frames.
     let stableEnoughToSound = stage != .unknown
-      || (droneCandidateFrames >= 3 && averageConfidence >= 0.40)
+      || (droneCandidateFrames >= 3 && averageConfidence >= minimumConfidence)
     if stableEnoughToSound { soundForStableStage(stage) }
     previousAlertStage = stage
   }
