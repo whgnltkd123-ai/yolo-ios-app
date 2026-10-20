@@ -1,9 +1,13 @@
+> **2026-10-20 실패 원인 및 후보 교체:** 이전 `HarshaaMg/Flying_Object_Detection` 체크포인트의 실제 레이블은 `['airplane', 'drone', 'helicopter']`였습니다. README에는 bird가 표시됐지만 가중치에는 없었으므로 사용 중단했습니다.
+>
+> **새 시험 후보:** https://github.com/kaal-bhairav69/Drones_vs_Birds_detection 의 `drone_vs_birds_detection/best (3).pt` (고정 커밋 `9a71f9e`, 약 22.5MB). 저장소는 새/드론 구분용 YOLOv8이라고 설명하지만 **별도 검증은 아직 없고 명시적인 라이선스가 없습니다.** 개인 기술 검증용으로만 다운로드를 시도하며 재배포/운용 전에 권리 확인과 성능 검증이 필요합니다. 모델은 웹 설명과 달리 `model.names`가 실제 `bird`, `drone` 두 클래스인지 코드가 직접 검사합니다. 검사를 통과하지 못하면 빌드를 실패 처리합니다. 새로운 Core ML 변환·빌드는 아직 성공 확인 전입니다.
+>
 > **2026-10-20 시험 파이프라인 업데이트**
 >
 > - 현재 앱은 새/드론 동시 클래스가 있어야만 경보를 허용하고, 별도 시험 워크플로 `bird-drone-prototype`를 추가했습니다.
-> - Codemagic에서 `Bird vs Drone - Core ML Test (unsigned)` 워크플로를 **수동 실행**하면 고정된 공개 YOLOv8 3클래스 가중치를 다운로드하여 Git blob 해시로 검증한 뒤 Core ML로 변환하고 앱에 넣도록 시도합니다. 결과물 이름은 `YOLO-Bird-Drone-unsigned.ipa`입니다.
+> - Codemagic에서 `Bird vs Drone - Core ML Test (unsigned)` 워크플로를 **수동 실행**하면 고정된 공개 YOLOv8 새/드론 2클래스 후보 가중치를 다운로드하여 Git blob 해시와 실제 레이블을 검증한 뒤 Core ML로 변환하고 앱에 넣도록 시도합니다. 결과물 이름은 `YOLO-Bird-Drone-unsigned.ipa`입니다.
 > - 이는 **이미 학습된 모델을 가져오는 시험용 변환**이며, 자체 데이터셋으로 새로 학습한 것이 아닙니다. 변환 또는 빌드 성공도 아직 확인되지 않았습니다. Python/패키지 설치, 외부 파일 다운로드 문제가 나면 빌드 로그 확인이 필요합니다.
-> - 모델 출처: https://github.com/HarshaaMg/Flying_Object_Detection 의 `weights/refined_3class/best.pt`. 약 52MB. 출처 README에는 MIT라 쓰여 있지만 실제 LICENSE는 AGPL-3.0이라 라이선스 표기가 불일치합니다. 신뢰성/재배포 전에 확인하세요.
+> - 최초 실패 모델: `HarshaaMg/Flying_Object_Detection` (새 레이블 부재) — 사용 중단. 새 후보는 이 문서 상단의 `kaal-bhairav69` 가중치입니다. 라이선스가 명시되지 않아 재배포하지 마세요.
 > - **보안:** 미확인 .pt 체크포인트는 역직렬화할 때 코드를 실행할 위험이 있어 서명 키 등 비밀이 없는 격리된 시험 환경에서만 변환해야 합니다.
 > - 영상을 실제로 확보한 경우 `tools/evaluate_bird_drone_videos.py`에 새-only/드론-only/빈 하늘 영상을 넣으면 선택 프레임마다 새를 드론으로 잘못 분류하는 비율을 계산할 수 있습니다. 이 비율은 일반적인 mAP가 아닙니다.
 
