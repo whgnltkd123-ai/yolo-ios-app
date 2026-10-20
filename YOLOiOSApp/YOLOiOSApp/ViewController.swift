@@ -267,7 +267,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     guard result.names.contains(where: isBirdClass),
           result.names.contains(where: isDroneClass) else {
       resetDroneCandidate()
-      droneAlertStatusLabel.text = "새·드론 동시 학습 모델이 필요함"
+      droneAlertStatusLabel.text = "기본 YOLO26에는 드론 클래스 없음 · 추가 학습 필요"
       return
     }
 
@@ -536,12 +536,10 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private func reloadModelEntriesAndLoadFirst(for taskName: String) {
     showModelEntries(for: taskName)
 
-    // In the optional bird/drone prototype build, pick the 3-class model first.
-    // Regular unsigned builds still select the original nano model.
-    let preferredSize: ModelSelectionManager.ModelSize =
-      (taskName == "Detect"
-        && standardModels[.s]?.name.lowercased().hasPrefix("yolo8s-birddrone") == true)
-      ? .s : .n
+    // Always start with the fast YOLO26 nano engine. When a fine-tuned
+    // YOLO26n bird/drone model is bundled, ModelSelectionManager makes
+    // that the nano selection without changing the camera or inference SDK.
+    let preferredSize: ModelSelectionManager.ModelSize = .n
     if let model = standardModels[preferredSize]
     {
       modelSegmentedControl.selectedSegmentIndex =
