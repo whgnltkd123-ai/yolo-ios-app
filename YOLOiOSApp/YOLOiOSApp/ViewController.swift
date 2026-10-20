@@ -32,14 +32,30 @@ let appTasks: [(name: String, shortName: String, folder: String, yoloTask: YOLOT
 private final class DroneAlertSoundPlayer {
   private var currentPlayer: AVAudioPlayer?
   private var cachedTones: [Int: Data] = [:]
+  private var currentStage: Int?
+  private var stopWhenResultsExpire: DispatchWorkItem?
+
+  deinit {
+    stopWhenResultsExpire?.cancel()
+    currentPlayer?.stop()
+  }
 
   func stop() {
+    stopWhenResultsExpire?.cancel()
+    stopWhenResultsExpire = nil
     currentPlayer?.stop()
     currentPlayer = nil
+    currentStage = nil
   }
 
   func play(stage: Int) {
     guard (1...3).contains(stage) else { return }
+    // A loop must expire if camera results stop arriving.
+    stopWhenResultsExpire?.cancel()
+    let expiry = DispatchWorkItem { [weak self] in self?.stop() }
+    stopWhenResultsExpire = expiry
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: expiry)
+    if currentStage == stage && currentPlayer?.isPlaying == true { return }
     let wav = cachedTones[stage] ?? Self.makeTone(stage: stage)
     cachedTones[stage] = wav
     do {
@@ -48,10 +64,13 @@ private final class DroneAlertSoundPlayer {
       try AVAudioSession.sharedInstance().setActive(true)
       currentPlayer?.stop()
       currentPlayer = try AVAudioPlayer(data: wav)
-      currentPlayer?.volume = 0.8
+      currentPlayer?.volume = 1.0
+      currentPlayer?.numberOfLoops = -1
+      currentStage = stage
       currentPlayer?.prepareToPlay()
       currentPlayer?.play()
     } catch {
+      stop()
       print("Drone alert audio unavailable: \(error)")
     }
   }
@@ -92,15 +111,15 @@ private final class DroneAlertSoundPlayer {
       let frequency: Double
       let gate: Double
       switch stage {
-      case 1: // Unknown: two quiet, short pulses
+      case 1: // Unknown: two short pulses
         frequency = 630
-        gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.28 : 0
+        gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.55 : 0
       case 2: // Suspected: three medium warning pulses
         frequency = 880
-        gate = Int(t / 0.23) < 3 && t.truncatingRemainder(dividingBy: 0.23) < 0.14 ? 0.48 : 0
+        gate = Int(t / 0.23) < 3 && t.truncatingRemainder(dividingBy: 0.23) < 0.14 ? 0.75 : 0
       default: // High-confidence model indication: alternating siren
         frequency = 950 + 390 * sin(2 * .pi * 2.5 * t)
-        gate = 0.42
+        gate = 0.80
       }
       phase += 2 * .pi * frequency / Double(sampleRate)
       let fade = min(1.0, min(t * 50, (duration - t) * 50))
@@ -249,7 +268,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var wingMotion = WingMotionEvidence()
   private var recentDroneConfidence: [Float] = []
   private var previousAlertStage: DroneAlertStage = .none
-  private var lastAlertByStage: [DroneAlertStage: Date] = [:]
 
   private func installDroneAlertControls() {
     let panel = UIStackView(arrangedSubviews: [aerialBoxesButton, droneAlertButton, droneAlertStatusLabel])
@@ -311,6 +329,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
   }
 
   private func resetDroneCandidate() {
+    droneAlertAudio.stop()
     droneCandidateFrames = 0
     previousDroneBox = nil
     previousCandidateClass = nil
@@ -365,11 +384,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private func soundForStableStage(_ stage: DroneAlertStage) {
     guard stage != .none else { return }
-    let cooldown: TimeInterval = stage == .unknown ? 30 : (stage == .suspected ? 16 : 10)
-    let now = Date()
-    guard lastAlertByStage[stage].map({ now.timeIntervalSince($0) >= cooldown }) ?? true
-    else { return }
-    lastAlertByStage[stage] = now
+    droneAlertAudio.play(stage: stage.rawValue)
+    guard stage != previousAlertStage else { return }
     switch stage {
     case .unknown:
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -380,7 +396,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
       AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
     case .none: break
     }
-    droneAlertAudio.play(stage: stage.rawValue)
   }
 
   private func processDroneAlert(result: YOLOResult) {
@@ -456,11 +471,13 @@ class ViewController: UIViewController, YOLOViewDelegate {
       stage = .high
       droneAlertStatusLabel.text = String(
         format: "드론 확신(모델 추정) %.0f%%", averageConfidence * 100)
-    } else if isDroneClass(candidate.cls) && droneCandidateFrames >= 4 && averageConfidence >= 0.60
-      && candidate.conf >= 0.60 && hasResolvableShape {
+    } else if isDroneClass(candidate.cls)
+      && droneCandidateFrames >= (hasResolvableShape ? 4 : 8) && averageConfidence >= 0.60
+      && candidate.conf >= 0.60 {
       stage = .suspected
       droneAlertStatusLabel.text = String(
-        format: "드론 의심 %.0f%%", averageConfidence * 100)
+        format: hasResolvableShape ? "드론 의심 %.0f%%" : "드론 의심 · 작은 물체 사전 경보 %.0f%%",
+        averageConfidence * 100)
     } else {
       stage = .unknown
       droneAlertStatusLabel.text = String(
@@ -470,7 +487,11 @@ class ViewController: UIViewController, YOLOViewDelegate {
     // Unknown objects only generate their quieter alarm after tracking across multiple frames.
     let stableEnoughToSound = stage != .unknown
       || (droneCandidateFrames >= 3 && averageConfidence >= minimumConfidence)
-    if stableEnoughToSound { soundForStableStage(stage) }
+    if stableEnoughToSound {
+      soundForStableStage(stage)
+    } else {
+      droneAlertAudio.stop()
+    }
     previousAlertStage = stage
   }
 
@@ -517,6 +538,11 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private var isLoadingModel = false
   private var currentLoadingTask: String?
+
+  override func viewWillDisappear(_ animated: Bool) {
+    super.viewWillDisappear(animated)
+    resetDroneCandidate()
+  }
 
   override func viewDidLoad() {
     super.viewDidLoad()
