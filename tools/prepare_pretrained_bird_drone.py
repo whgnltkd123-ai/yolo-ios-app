@@ -12,6 +12,7 @@ converts to Core ML without embedded NMS, and bundles a model to be tested.
 No field accuracy or reliability is claimed.
 """
 import hashlib
+import os
 import shutil
 import ssl
 import sys
@@ -70,7 +71,14 @@ def main():
     if set(classes) != {"bird", "drone"} or len(classes) != 2:
         raise RuntimeError(f"Expected exactly bird/drone model labels; received {classes}")
 
-    export_path = Path(str(model.export(format="coreml", imgsz=640, nms=False, device="cpu")))
+    # Prefer responsiveness for this prototype. 416px has ~58% fewer input pixels than 640px.
+    # The trade-off is potentially worse recognition of distant/small drones.
+    # To compare high-detail behavior, set BIRD_DRONE_IMGSZ=640 on the build worker.
+    image_size = int(os.environ.get("BIRD_DRONE_IMGSZ", "416"))
+    if image_size not in (416, 512, 640):
+        raise RuntimeError("BIRD_DRONE_IMGSZ must be 416, 512 or 640")
+    print(f"Core ML export input: {image_size}x{image_size} (speed/detail trade-off)")
+    export_path = Path(str(model.export(format="coreml", imgsz=image_size, nms=False, device="cpu")))
     if export_path.suffix != ".mlpackage" or not export_path.is_dir():
         raise RuntimeError(f"Core ML export did not produce a package: {export_path}")
 
