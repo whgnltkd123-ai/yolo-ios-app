@@ -34,13 +34,18 @@ struct ModelSelectionManager {
         if let char = sizeChar,
           let size = ModelSize(rawValue: String(char))
         {
-          // The optional 3-class pretrained model is a two-class YOLOv8 candidate (~22.5MB).
-          // Give it the 'm' slot and do not overwrite it with the stock YOLO26s.
-          let isBirdDroneModel = baseName == "yolo8s-birddrone"
-          let previouslySelected = standardModels[size]?.name.lowercased()
-            .hasPrefix("yolo8s-birddrone") ?? false
-          if size == .s && previouslySelected && !isBirdDroneModel {
+          // Keep native YOLO26n as the fast default. If a properly fine-tuned
+          // YOLO26n bird/drone model is bundled, prefer it in the nano slot.
+          // Never auto-select the older YOLOv8 bird/drone candidate.
+          let isYOLO26DroneModel = baseName == "yolo26n-birddrone"
+          let previousIsYOLO26Drone = standardModels[size]?.name.lowercased()
+            .hasPrefix("yolo26n-birddrone") ?? false
+          if size == .n && previousIsYOLO26Drone && !isYOLO26DroneModel {
             continue
+          }
+          if size == .n && !isYOLO26DroneModel && standardModels[size] != nil {
+            // The base YOLO26n wins over unrelated n-size custom models.
+            if baseName != "yolo26n" || previousIsYOLO26Drone { continue }
           }
           standardModels[size] = ModelInfo(
             name: model.name,
