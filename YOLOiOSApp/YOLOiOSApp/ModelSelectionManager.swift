@@ -20,42 +20,41 @@ struct ModelSelectionManager {
   private static let modelSizeRegex = try! NSRegularExpression(
     pattern: "^\\d+([nsmxl])", options: [])
 
+  /// Preserve the fast official YOLO26n detector until a real verified 81-class
+  /// YOLO26n model has been bundled. Do not prefer old bird/drone YOLOv8 test models.
   static func categorizeModels(from models: [(name: String, url: URL?, isLocal: Bool)])
     -> [ModelSize: ModelInfo]
   {
     var standardModels: [ModelSize: ModelInfo] = [:]
+    var bestNanoPriority = -1
 
     for model in models {
       let baseName = (model.name as NSString).deletingPathExtension.lowercased()
+      guard baseName.hasPrefix("yolo"),
+            let sizeChar = extractSizeFromModelName(baseName),
+            let size = ModelSize(rawValue: String(sizeChar))
+      else { continue }
 
-      if baseName.hasPrefix("yolo") {
-        let sizeChar = extractSizeFromModelName(baseName)
-
-        if let char = sizeChar,
-          let size = ModelSize(rawValue: String(char))
-        {
-          // Keep native YOLO26n as the fast default. If a properly fine-tuned
-          // YOLO26n bird/drone model is bundled, prefer it in the nano slot.
-          // Never auto-select the older YOLOv8 bird/drone candidate.
-          let isYOLO26DroneModel = baseName == "yolo26n-birddrone"
-          let previousIsYOLO26Drone = standardModels[size]?.name.lowercased()
-            .hasPrefix("yolo26n-birddrone") ?? false
-          if size == .n && previousIsYOLO26Drone && !isYOLO26DroneModel {
-            continue
-          }
-          if size == .n && !isYOLO26DroneModel && standardModels[size] != nil {
-            // The base YOLO26n wins over unrelated n-size custom models.
-            if baseName != "yolo26n" || previousIsYOLO26Drone { continue }
-          }
-          standardModels[size] = ModelInfo(
-            name: model.name,
-            url: model.url,
-            isLocal: model.isLocal
-          )
+      if size == .n {
+        let priority: Int
+        if baseName == "yolo26n-drone81" { priority = 100 }
+        else if baseName == "yolo26n" || baseName.hasPrefix("yolo26n.mlpackage") {
+          priority = 80
         }
-      }
-    }
+        else if baseName.contains("birddrone") { priority = 0 }
+        else { priority = 10 }
 
+        // A local bundled model wins over a remote model of the same priority.
+        let adjusted = priority + (model.isLocal ? 1 : 0)
+        if adjusted <= bestNanoPriority { continue }
+        bestNanoPriority = adjusted
+      }
+      standardModels[size] = ModelInfo(
+        name: model.name,
+        url: model.url,
+        isLocal: model.isLocal
+      )
+    }
     return standardModels
   }
 
