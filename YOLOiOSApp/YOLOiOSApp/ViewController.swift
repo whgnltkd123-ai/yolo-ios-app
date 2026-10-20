@@ -881,7 +881,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
       if success {
         self.labelName.text = processString(modelName)
         self.resetDroneCandidate()
-        if modelName.lowercased().contains("birddrone") {
+        if modelName.lowercased().contains("birddrone") || modelName.lowercased().contains("drone81") {
           // Experimental two-class model: retain modest-confidence candidates for temporal validation.
           self.yoloView.setConfidenceThreshold(0.30)
           self.yoloView.setNumItemsThreshold(30)
