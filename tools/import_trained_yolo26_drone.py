@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Import the user's OWN trained YOLO26n bird/drone .pt weights into the iOS app.
+"""Import the user's OWN trained YOLO26n drone/bird/airplane weights into the iOS app.
 
 Mandatory environment variables:
-  YOLO26_DRONE_CHECKPOINT_URL=https://.../best.pt
+  YOLO26_DRONE_CHECKPOINT_PATH=checkpoints/aerial-three/best.pt
+  (or YOLO26_DRONE_CHECKPOINT_URL=https://.../best.pt)
   YOLO26_DRONE_CHECKPOINT_SHA256=<64 hex characters>
 
 This intentionally fails without trained weights. Downloading stock yolo26n.pt
@@ -23,18 +24,26 @@ from pathlib import Path
 import certifi
 from ultralytics import YOLO
 
-DEST = Path("YOLOiOSApp/Models/Detect/yolo26n-birddrone.mlpackage")
+DEST = Path("YOLOiOSApp/Models/Detect/yolo26n-aerial3.mlpackage")
 
 
 def download_verified_weights() -> Path:
     url = os.environ.get("YOLO26_DRONE_CHECKPOINT_URL", "").strip()
+    local = os.environ.get("YOLO26_DRONE_CHECKPOINT_PATH", "").strip()
     sha = os.environ.get("YOLO26_DRONE_CHECKPOINT_SHA256", "").lower().strip()
-    if not url or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
+    if not (url or local) or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
         raise SystemExit(
             "No fine-tuned YOLO26 checkpoint provided. Set "
-            "YOLO26_DRONE_CHECKPOINT_URL and YOLO26_DRONE_CHECKPOINT_SHA256 "
+            "YOLO26_DRONE_CHECKPOINT_PATH (or URL) and YOLO26_DRONE_CHECKPOINT_SHA256 "
             "in Codemagic. Stock YOLO26 has no drone class."
         )
+    if local:
+        if url:
+            raise SystemExit("Specify one checkpoint source, not both PATH and URL.")
+        source = Path(local)
+        if hashlib.sha256(source.read_bytes()).hexdigest() != sha:
+            raise SystemExit("Local checkpoint SHA256 mismatch.")
+        return source
     parts = urllib.parse.urlparse(url)
     if parts.scheme != "https" or not parts.netloc or parts.username or parts.password:
         raise SystemExit("Checkpoint URL must be public or authenticated externally via a safe HTTPS download link.")
@@ -73,8 +82,8 @@ def main():
     if model.task != "detect":
         raise SystemExit(f"Expected a detection checkpoint, got: {model.task}")
     labels = [str(model.names[i]).strip().lower() for i in sorted(model.names)]
-    if len(labels) != 2 or set(labels) != {"bird", "drone"}:
-        raise SystemExit(f"Expected exactly bird and drone classes, received {labels}")
+    if labels != ["drone", "bird", "airplane"]:
+        raise SystemExit(f"Expected drone, bird, airplane in that order, received {labels}")
     # If available, check the training arguments for the YOLO26 pretrained model.
     ckpt = getattr(model, "ckpt", None) or {}
     args = ckpt.get("train_args", {}) if isinstance(ckpt, dict) else {}
@@ -85,7 +94,7 @@ def main():
         or starting_model.endswith("nano-bird-drone.pt")
     ):
         print("WARNING: checkpoint training arguments do not prove a YOLO26n lineage:", starting_model)
-    imgsz = int(os.environ.get("YOLO26_DRONE_IMGSZ", "512"))
+    imgsz = int(os.environ.get("YOLO26_DRONE_IMGSZ", "640"))
     if imgsz not in (416, 512, 640):
         raise SystemExit("YOLO26_DRONE_IMGSZ must be 416, 512, or 640.")
     print("Exporting trained detection checkpoint as end-to-end Core ML at", imgsz)

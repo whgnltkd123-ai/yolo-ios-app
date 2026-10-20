@@ -198,7 +198,8 @@ def main():
     replay = rng.choice(len(originals), size=min(5000, len(originals)), replace=False)
     training = sorted(images.glob("*.jpg")) + [originals[i] for i in replay]
     manifest = args.output / "train.txt"
-    manifest.write_text("\n".join(str(p.resolve()) for p in training) + "\n")
+    # Keep replay symlink paths: their sibling labels contain the three-class remap.
+    manifest.write_text("\n".join(str(p.absolute()) for p in training) + "\n")
     (args.output / "data.yaml").write_text(yaml.safe_dump({
         "path": str(args.output.resolve()), "train": str(manifest.resolve()),
         "val": str(val_dir.resolve()), "names": dict(enumerate(names)),

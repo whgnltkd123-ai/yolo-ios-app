@@ -1,0 +1,21 @@
+{
+  "classes": [
+    "drone",
+    "bird",
+    "airplane"
+  ],
+  "sha256": "024b3ba7a552a9b52a88cb6de05cf6c2927b8db242ae2d792c215d602e450371",
+  "metrics": {
+    "metrics/precision(B)": 0.8741247472810852,
+    "metrics/recall(B)": 0.6880265458686398,
+    "metrics/mAP50(B)": 0.757838116590755,
+    "metrics/mAP50-95(B)": 0.5481223370727957,
+    "fitness": 0.5481223370727957
+  },
+  "per_class_ap50_95": [
+    0.6902341512157104,
+    0.27667209493877437,
+    0.6774607650639024
+  ],
+  "caveat": "Seraphim test used as validation. COCO background annotations do not establish drone absence by manual audit. No independent field testing performed."
+}

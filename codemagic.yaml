@@ -86,28 +86,31 @@ workflows:
       - /tmp/xcodebuild_logs/*.log
 
   yolo26-drone-alert:
-    name: YOLO26 Drone Alert - 3 Levels (trained model required, unsigned)
+    name: YOLO26 Drone Bird Airplane - 3 Levels (trained model required, unsigned)
     # Uses native YOLO26 detector architecture, not the previous YOLOv8s checkpoint.
-    # A user-trained bird/drone YOLO26n checkpoint is MANDATORY; never fake training.
+    # A user-trained drone/bird/airplane YOLO26n checkpoint is mandatory.
     # No signing secrets: download only a trusted checkpoint.
     instance_type: mac_mini_m2
     max_build_duration: 120
     environment:
       xcode: latest
+      vars:
+        YOLO26_DRONE_CHECKPOINT_PATH: checkpoints/aerial-three/best.pt
+        YOLO26_DRONE_CHECKPOINT_SHA256: "024b3ba7a552a9b52a88cb6de05cf6c2927b8db242ae2d792c215d602e450371"
     scripts:
       - name: Verify trained YOLO26 checkpoint and convert to Core ML
         script: |
           set -euo pipefail
-          : "${YOLO26_DRONE_CHECKPOINT_URL:?Set the HTTPS URL of your own trained YOLO26 bird/drone best.pt}"
+          : "${YOLO26_DRONE_CHECKPOINT_PATH:?Set the verified three-class checkpoint path}"
           : "${YOLO26_DRONE_CHECKPOINT_SHA256:?Set SHA256 for that exact best.pt}"
           PYTHON="$(command -v python3.11 || command -v python3)"
           "$PYTHON" -m venv "$CM_BUILD_DIR/.yolo26-drone-venv"
           source "$CM_BUILD_DIR/.yolo26-drone-venv/bin/activate"
           python -m pip install --upgrade pip
-          python -m pip install "ultralytics>=8.4,<9" "coremltools>=9,<11" "numpy<2.4" "certifi>=2025.4"
+          python -m pip install "ultralytics==8.4.183" "coremltools>=9,<11" "numpy<2.4" "certifi>=2025.4"
           python tools/import_trained_yolo26_drone.py
-          test -f "YOLOiOSApp/Models/Detect/yolo26n-birddrone.mlpackage/Manifest.json"
-      - name: Build native YOLO26 iOS app with fine-tuned bird/drone weights
+          test -f "YOLOiOSApp/Models/Detect/yolo26n-aerial3.mlpackage/Manifest.json"
+      - name: Build native YOLO26 iOS app with trained drone bird airplane weights
         script: |
           set -euo pipefail
           xcodebuild \
