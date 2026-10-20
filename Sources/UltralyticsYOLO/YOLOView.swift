@@ -1282,7 +1282,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       self.selectedLensDeviceID = device.position == .back ? device.uniqueID : nil
       let rawZoomFactor =
         zoomFactor(for: device, on: activeDevice)
-        ?? min(max(activeDevice.videoZoomFactor, self.minimumZoom), self.maximumZoom)
+        ?? activeDevice.videoZoomFactor
       self.lastZoomFactor = rawZoomFactor
       self.labelZoom.text = self.zoomLabelText(rawZoomFactor: rawZoomFactor, device: activeDevice)
       // Switching the camera input drops the torch (the new device may not have one); sync the chip
