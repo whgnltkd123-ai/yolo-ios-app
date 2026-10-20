@@ -63,6 +63,16 @@ python tools/prepare_yolo26_81_data.py --coco-root /data/coco --drone-root /data
 
 ## GPU 학습 (별도 GPU / Google Colab)
 
+Colab 노트북은 COCO의 사각형 라벨(`coco2017labels.zip`)을 받습니다. 기본
+`coco.yaml` 자동 다운로드의 다각형 라벨은 현재 통합 스크립트와 맞지 않습니다.
+COCO 다운로드 직전에 최소 45GiB의 여유 공간을 확인합니다.
+
+학습 전에 Google Drive 연결을 직접 승인하세요. 노트북의 학습 결과는
+`MyDrive/YOLO26-81-training/coco80-plus-drone`에 저장되며, 완료된 매 epoch의
+`weights/last.pt`로 다음 세션에서 이어 학습합니다. 세션이 끊기면 `/content`의
+데이터는 사라질 수 있으므로 데이터 준비 셀을 다시 실행해야 합니다.
+마지막 저장 이후 진행 중이던 epoch는 다시 계산됩니다. 무료 GPU 이용 시간은 보장되지 않습니다.
+
 ```bash
 pip install 'ultralytics>=8.4.142,<9' pyyaml
 python tools/train_yolo26_81.py --data /data/yolo26_81/data.yaml --epochs 60 --imgsz 640 --batch 8 --device 0

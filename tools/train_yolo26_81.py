@@ -53,6 +53,7 @@ def main():
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--device", default="0")
     parser.add_argument("--project", default="runs/yolo26-81")
+    parser.add_argument("--resume", type=Path, help="Resume an interrupted run from its last.pt")
     parser.add_argument("--coco-val-data", type=Path, help="Optional ORIGINAL COCO-80 val data.yaml for retention check")
     parser.add_argument("--max-coco-map-drop", type=float, default=0.15)
     args = parser.parse_args()
@@ -66,6 +67,8 @@ def main():
     # The Ultralytics implementation maps matching COCO classification-head
     # rows by class name on 80->81 changes. Joint training is mandatory:
     # merely adding class name 'drone' does not teach drone geometry.
+    if args.resume:
+        model = YOLO(str(args.resume.expanduser().resolve()))
     model.train(
         data=str(args.data.expanduser().resolve()),
         epochs=args.epochs,
@@ -78,6 +81,7 @@ def main():
         exist_ok=True,
         seed=42,
         cls_remap=True,
+        resume=bool(args.resume),
         plots=True,
     )
     best = Path(model.trainer.best)
