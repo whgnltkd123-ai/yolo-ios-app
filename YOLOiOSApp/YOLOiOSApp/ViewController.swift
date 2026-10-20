@@ -411,8 +411,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
     // Regular unsigned builds still select the original nano model.
     let preferredSize: ModelSelectionManager.ModelSize =
       (taskName == "Detect"
-        && standardModels[.m]?.name.lowercased().hasPrefix("yolo8m-birddrone") == true)
-      ? .m : .n
+        && standardModels[.s]?.name.lowercased().hasPrefix("yolo8s-birddrone") == true)
+      ? .s : .n
     if let model = standardModels[preferredSize]
     {
       modelSegmentedControl.selectedSegmentIndex =
