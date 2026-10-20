@@ -112,6 +112,8 @@ def main():
     parser.add_argument("--drone-root", type=Path, required=True, help="Roboflow train/images + valid/images")
     parser.add_argument("--drone-yaml", type=Path, required=True, help="Source drone dataset data.yaml")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--drone-valid-split", default="valid", choices=("valid", "val", "test"),
+                        help="Seraphim uses test; typical Roboflow datasets use valid")
     parser.add_argument("--copy-images", action="store_true", help="Copy instead of symlink for portable output")
     args = parser.parse_args()
 
@@ -139,11 +141,11 @@ def main():
         labels.mkdir(parents=True, exist_ok=True)
         count = collections.Counter()
         coco_split = COCO_SPLITS[split]
-        drone_split = DRONE_SPLITS[split]
+        drone_split = "train" if split == "train" else args.drone_valid_split
         coco_total = assemble_split(
             args.coco_root / "images" / coco_split,
             args.coco_root / "labels" / coco_split,
-            images, labels, "coco", dict(enumerate(coco_names)) and {i: i for i in range(80)},
+            images, labels, "coco", {i: i for i in range(80)},
             args.copy_images, count,
         )
         drone_total = assemble_split(
@@ -169,6 +171,8 @@ def main():
     print("COCO-80 + drone index 80 merged:", output / "data.yaml")
     print("Source data MUST have approved reuse terms. Never split adjacent frames across train/val.")
     print("Counts:", summary)
+    if args.drone_valid_split == "test":
+        print("WARNING: Seraphim test became validation; reserve DIFFERENT independent footage for final testing.")
     print("WARNING: This only prepares data. It has NOT trained or validated any weights.")
 
 
