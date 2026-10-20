@@ -79,7 +79,9 @@ private final class DroneAlertSoundPlayer {
     let sampleRate = 22_050
     let duration = stage == 1 ? 0.48 : (stage == 2 ? 0.82 : 1.6)
     let count = Int(Double(sampleRate) * duration)
-    let byteCount = count * 2
+    // Keep a one-second silent gap between repeated alert patterns.
+    let silenceCount = sampleRate
+    let byteCount = (count + silenceCount) * 2
     var wav = Data(capacity: 44 + byteCount)
     func ascii(_ string: String) { wav.append(contentsOf: string.utf8) }
     func le16(_ value: UInt16) {
@@ -126,6 +128,7 @@ private final class DroneAlertSoundPlayer {
       let sample = Int16(max(-1, min(1, sin(phase) * gate * max(0, fade))) * 32767)
       le16(UInt16(bitPattern: sample))
     }
+    wav.append(Data(count: silenceCount * 2))
     return wav
   }
 }
