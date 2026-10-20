@@ -119,6 +119,17 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
 
   public var onDetection: ((YOLOResult) -> Void)?
 
+  /// Keep the original 80-class YOLO26 inference fully intact while showing only
+  /// flying-object detection boxes. This only reduces UI overlay work, not model FLOPs.
+  /// The original COCO model has bird/airplane/kite, but NOT a drone class.
+  public var showsOnlyAerialDetections = true {
+    didSet {
+      if oldValue != showsOnlyAerialDetections {
+        boundingBoxViews.forEach { $0.hide() }
+      }
+    }
+  }
+
   /// Controls whether the built-in prediction overlays (boxes, masks, pose, classification) are drawn.
   /// When `false`, inference and the result callbacks (`delegate`, `onDetection`) keep firing, but nothing is
   /// rendered — letting consumers draw fully custom overlays. Defaults to `true`.
@@ -468,29 +479,51 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     parentLayer.contents = nil
   }
 
-  func showBoxes(predictions: YOLOResult) {
-    // The experimental bird/drone model produces many weak point-like false detections.
-    // Keep lower-confidence candidates available to temporal alerts, but do not render
-    // every one as an authoritative drone rectangle.
-    let isBirdDroneModel = modelName.lowercased().contains("birddrone")
-    let visibleBoxes = predictions.boxes.filter { box in
-      guard isBirdDroneModel, box.cls.lowercased() == "drone" else { return true }
-      return box.conf >= 0.40 && min(box.xywhn.width, box.xywhn.height) >= 0.004
-    }
-    let maxVisible = min(visibleBoxes.count, 50, boundingBoxViews.count)
+  /// Restrict *visible* detections to aerial classes, without discarding inference
+  /// results or changing the YOLO26 model's other classes.
+  private func isAerialDetectionClass(_ label: String) -> Bool {
+    let name = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let aerialClasses: Set<String> = [
+      "bird", "birds", "airplane", "aeroplane", "aircraft", "plane",
+      "kite", "helicopter", "glider", "balloon", "hot air balloon",
+      "drone", "drones", "uav", "uas", "quadcopter", "hexacopter",
+      "multicopter", "fpv drone", "fpv-drone", "fixed wing", "fixed-wing",
+      "unmanned aerial vehicle",
+    ]
+    return aerialClasses.contains(name) || name.hasPrefix("drone ") || name.hasSuffix(" drone")
+  }
 
+  func showBoxes(predictions: YOLOResult) {
+    // Iterate directly without constructing a filtered array on every frame.
+    // Inference still evaluates all of the original YOLO26 COCO object classes.
+    let isBirdDroneModel = modelName.lowercased().contains("birddrone")
+    let maxVisible = min(50, boundingBoxViews.count)
     let viewSize = bounds.size
-    for i in 0..<maxVisible {
-      let prediction = visibleBoxes[i]
+    var shown = 0
+
+    for prediction in predictions.boxes {
+      if shown >= maxVisible { break }
+      if task == .detect && showsOnlyAerialDetections
+        && !isAerialDetectionClass(prediction.cls) {
+        continue
+      }
+      // Suppress particularly weak speck detections in the legacy test model.
+      if isBirdDroneModel
+        && prediction.cls.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "drone"
+        && (prediction.conf < 0.40
+          || min(prediction.xywhn.width, prediction.xywhn.height) < 0.004) {
+        continue
+      }
       let rect = aspectFillDisplayRect(
         for: prediction.xywhn,
         imageSize: predictions.orig_shape,
         viewSize: viewSize
       )
-      showBox(at: i, prediction: prediction, frame: rect)
+      showBox(at: shown, prediction: prediction, frame: rect)
+      shown += 1
     }
 
-    for i in maxVisible..<boundingBoxViews.count {
+    for i in shown..<boundingBoxViews.count {
       boundingBoxViews[i].hide()
     }
   }
