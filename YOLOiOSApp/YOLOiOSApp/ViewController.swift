@@ -119,6 +119,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
   @IBOutlet weak var labelName: UILabel!
   @IBOutlet weak var labelFPS: UILabel!
   /// Latest "x FPS - y ms" line and pre/inference/post breakdown, rendered together in `labelFPS`.
+  private var lastPerformanceLabelDraw: CFTimeInterval = 0
   private var fpsText = ""
   private var breakdownText = ""
   @IBOutlet weak var labelVersion: UILabel!
@@ -137,7 +138,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var loadingOverlayView: UIView?
 
   // MARK: - Stable bird/drone warning levels (experimental model estimates, not identity proof)
-  private enum DroneAlertStage: Int {
+  private enum DroneAlertStage: Int, Hashable {
     case none = 0
     case unknown = 1
     case suspected = 2
@@ -1027,8 +1028,6 @@ extension ViewController {
 
   /// Renders the FPS line with the smaller stage-breakdown line beneath it in the single `labelFPS`,
   /// so the breakdown inherits the label's exact layout and show/hide behavior (e.g. camera switching).
-  private var lastPerformanceLabelDraw: CFTimeInterval = 0
-
   private func renderPerformanceLabel() {
     let now = CACurrentMediaTime()
     guard lastPerformanceLabelDraw == 0 || now - lastPerformanceLabelDraw >= 0.35 else { return }
