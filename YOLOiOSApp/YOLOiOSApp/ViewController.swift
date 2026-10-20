@@ -111,6 +111,94 @@ private final class DroneAlertSoundPlayer {
   }
 }
 
+/// Experimental silhouette periodicity, not a bird classifier.
+/// Only uniform-background, resolved targets can provide evidence; missing evidence proves nothing.
+private struct WingMotionEvidence {
+  private var samples: [(time: Double, shape: Double)] = []
+  private var previousBox: CGRect?
+  private var evidenceUntil = 0.0
+
+  mutating func reset() {
+    samples.removeAll(keepingCapacity: true)
+    previousBox = nil
+    evidenceUntil = 0
+  }
+
+  mutating func update(image: UIImage?, box: CGRect, time: Double) -> Bool {
+    if let last = samples.last, time - last.time < 0.045 { return time < evidenceUntil }
+    guard let image, image.imageOrientation == .up, let source = image.cgImage,
+      box.width * CGFloat(source.width) >= 24, box.height * CGFloat(source.height) >= 24
+    else { reset(); return false }
+    if let previousBox {
+      let shift = hypot(box.midX - previousBox.midX, box.midY - previousBox.midY)
+      let scale = box.width * box.height / max(previousBox.width * previousBox.height, 0.000001)
+      if shift > max(box.width, box.height) * 0.3 || !(0.6...1.67).contains(scale)
+        || time - (samples.last?.time ?? time) > 0.12 {
+        reset()
+      }
+    }
+    previousBox = box
+    let width = CGFloat(source.width), height = CGFloat(source.height)
+    let side = max(box.width * width, box.height * height) * 1.4
+    let rect = CGRect(x: box.midX * width - side / 2, y: box.midY * height - side / 2,
+                      width: side, height: side).integral
+    guard CGRect(x: 0, y: 0, width: width, height: height).contains(rect),
+      let crop = source.cropping(to: rect)
+    else { reset(); return false }
+    var pixels = [UInt8](repeating: 0, count: 32 * 32)
+    let rendered = pixels.withUnsafeMutableBytes { bytes -> Bool in
+      guard let context = CGContext(
+        data: bytes.baseAddress, width: 32, height: 32, bitsPerComponent: 8,
+        bytesPerRow: 32, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: 0)
+      else { return false }
+      context.draw(crop, in: CGRect(x: 0, y: 0, width: 32, height: 32))
+      return true
+    }
+    guard rendered else { reset(); return false }
+    let border = (0..<1024).filter { $0 / 32 < 2 || $0 / 32 > 29 || $0 % 32 < 2 || $0 % 32 > 29 }
+      .map { Double(pixels[$0]) }
+    let background = border.reduce(0, +) / Double(border.count)
+    let variance = border.reduce(0) { $0 + pow($1 - background, 2) } / Double(border.count)
+    guard variance < 144 else { reset(); return false }
+    let foreground = (0..<1024).filter { abs(Double(pixels[$0]) - background) > 35 }
+    guard (20...500).contains(foreground.count) else { reset(); return false }
+    let count = Double(foreground.count)
+    let cx = foreground.reduce(0.0) { $0 + Double($1 % 32) } / count
+    let cy = foreground.reduce(0.0) { $0 + Double($1 / 32) } / count
+    guard (10...22).contains(cx), (10...22).contains(cy) else { reset(); return false }
+    let xx = foreground.reduce(0.0) { $0 + pow(Double($1 % 32) - cx, 2) }
+    let yy = foreground.reduce(0.0) { $0 + pow(Double($1 / 32) - cy, 2) }
+    samples.append((time, yy / max(xx + yy, 1)))
+    if samples.count > 64 { samples.removeFirst() }
+    guard samples.count >= 48, let first = samples.first, let last = samples.last else { return false }
+    let dt = (last.time - first.time) / Double(samples.count - 1)
+    guard dt > 0, zip(samples.dropFirst(), samples).allSatisfy({
+      let gap = $0.0.time - $0.1.time
+      return gap > dt * 0.5 && gap < dt * 1.5
+    }) else { return false }
+    let mean = samples.reduce(0.0) { $0 + $1.shape } / Double(samples.count)
+    let values = samples.map { $0.shape - mean }
+    guard values.reduce(0, { $0 + $1 * $1 }) / Double(values.count) > 0.0025 else { return false }
+    // At least three cycles, four samples per cycle, and alternating shape changes.
+    for lag in 4...(values.count / 3) {
+      let frequency = 1 / (Double(lag) * dt)
+      guard (1.5...6).contains(frequency) else { continue }
+      func correlation(_ offset: Int) -> Double {
+        let pairs = zip(values.dropFirst(offset), values.dropLast(offset))
+        let numerator = pairs.reduce(0.0) { $0 + $1.0 * $1.1 }
+        let energyA = values.dropFirst(offset).reduce(0.0) { $0 + $1 * $1 }
+        let energyB = values.dropLast(offset).reduce(0.0) { $0 + $1 * $1 }
+        return numerator / max(sqrt(energyA * energyB), 0.000001)
+      }
+      if correlation(lag) > 0.75 && correlation(lag / 2) < -0.35 {
+        evidenceUntil = time + 0.5
+        return true
+      }
+    }
+    return time < evidenceUntil
+  }
+}
+
 /// The main view controller for the YOLO iOS application, handling model selection and visualization.
 class ViewController: UIViewController, YOLOViewDelegate {
 
@@ -158,6 +246,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var droneCandidateFrames = 0
   private var previousDroneBox: CGRect?
   private var previousCandidateClass: String?
+  private var wingMotion = WingMotionEvidence()
   private var recentDroneConfidence: [Float] = []
   private var previousAlertStage: DroneAlertStage = .none
   private var lastAlertByStage: [DroneAlertStage: Date] = [:]
@@ -192,6 +281,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     droneAlertStatusLabel.layer.cornerRadius = 6
     droneAlertStatusLabel.clipsToBounds = true
     droneAlertStatusLabel.numberOfLines = 2
+    yoloView.capturesOriginalImage = droneAlertEnabled
 
     yoloView.addSubview(panel)
     NSLayoutConstraint.activate([
@@ -224,12 +314,14 @@ class ViewController: UIViewController, YOLOViewDelegate {
     droneCandidateFrames = 0
     previousDroneBox = nil
     previousCandidateClass = nil
+    wingMotion.reset()
     recentDroneConfidence.removeAll(keepingCapacity: true)
     previousAlertStage = .none
   }
 
   @objc private func toggleDroneAlert() {
     droneAlertEnabled.toggle()
+    yoloView.capturesOriginalImage = droneAlertEnabled && currentTask == "Detect"
     if !droneAlertEnabled { droneAlertAudio.stop() }
     resetDroneCandidate()
     updateDroneAlertButton()
@@ -340,6 +432,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
       droneCandidateFrames = min(30, droneCandidateFrames + 1)
     } else {
       droneCandidateFrames = 1
+      wingMotion.reset()
       recentDroneConfidence.removeAll(keepingCapacity: true)
       previousAlertStage = .none
     }
@@ -351,9 +444,14 @@ class ViewController: UIViewController, YOLOViewDelegate {
       / Float(recentDroneConfidence.count)
     // Very small, dot-like regions must not be promoted to "high" solely by model score.
     let hasResolvableShape = min(candidate.xywhn.width, candidate.xywhn.height) >= 0.02
+    let wingLikeMotion = wingMotion.update(
+      image: result.originalImage, box: candidate.xywhn, time: CACurrentMediaTime())
 
     let stage: DroneAlertStage
-    if isDroneClass(candidate.cls) && droneCandidateFrames >= 7 && averageConfidence >= 0.83
+    if wingLikeMotion {
+      stage = .unknown
+      droneAlertStatusLabel.text = "🟡 미확인 물체 · 날개짓 유사 움직임(실험)"
+    } else if isDroneClass(candidate.cls) && droneCandidateFrames >= 7 && averageConfidence >= 0.83
       && candidate.conf >= 0.78 && hasResolvableShape {
       stage = .high
       droneAlertStatusLabel.text = String(
@@ -837,6 +935,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
         } == true)
 
       if success {
+        self.yoloView.capturesOriginalImage = self.droneAlertEnabled && loadedTask == "Detect"
         let previousTask = self.currentTask
         self.currentTask = loadedTask
         if let taskIndex = appTasks.firstIndex(where: { $0.name == loadedTask }) {

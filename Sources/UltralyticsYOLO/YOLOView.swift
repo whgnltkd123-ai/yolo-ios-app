@@ -119,6 +119,13 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
 
   public var onDetection: ((YOLOResult) -> Void)?
 
+  /// Opt-in source frames for consumers performing temporal image analysis.
+  public var capturesOriginalImage = false {
+    didSet {
+      (videoCapture.predictor as? BasePredictor)?.capturesOriginalImage = capturesOriginalImage
+    }
+  }
+
   /// Keep the original 80-class YOLO26 inference fully intact while showing only
   /// flying-object detection boxes. This only reduces UI overlay work, not model FLOPs.
   /// The original COCO model has bird/airplane/kite, but NOT a drone class.
@@ -270,6 +277,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
         self.activityIndicator.stopAnimating()
         switch result {
         case .success(let predictor):
+          predictor.capturesOriginalImage = self.capturesOriginalImage
           self.videoCapture.predictor = predictor
           predictor.setNumItemsThreshold(numItems: self.getNumItemsThreshold())
           self.labelName.text = processString(self.modelName)
