@@ -11,10 +11,12 @@ No field accuracy or reliability is claimed.
 """
 import hashlib
 import shutil
+import ssl
 import sys
 import urllib.request
 from pathlib import Path
 
+import certifi
 from ultralytics import YOLO
 
 REPO_COMMIT = "e4d852e2d7b2257568cb8e7c190a8691753270b1"
@@ -45,9 +47,18 @@ def main():
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     if not checkpoint.exists():
         print("Downloading pinned experimental bird/drone weights")
-        with urllib.request.urlopen(SOURCE, timeout=120) as resp:
-            with checkpoint.open("wb") as output:
-                shutil.copyfileobj(resp, output)
+        # Python.org's macOS Python may lack a configured system CA bundle.
+        # Verify HTTPS with an explicitly trusted Mozilla CA bundle instead
+        # of disabling certificate verification.
+        tls_context = ssl.create_default_context(cafile=certifi.where())
+        try:
+            with urllib.request.urlopen(SOURCE, timeout=120, context=tls_context) as resp:
+                with checkpoint.open("wb") as output:
+                    shutil.copyfileobj(resp, output)
+        except Exception:
+            # Remove partial files so a retry cannot read a truncated checkpoint.
+            checkpoint.unlink(missing_ok=True)
+            raise
     verify_git_blob(checkpoint)
 
     print("WARNING: The downloaded checkpoint is third-party code. Run only on an isolated worker.")
