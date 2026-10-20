@@ -2,7 +2,9 @@
 """Prepare an optional experimental YOLO bird/drone/aircraft model for iOS.
 
 The source is a third-party pretrained YOLOv8 checkpoint, *not* a model we
-trained. Only run this on a disposable build worker without credentials:
+trained. Its source repository does not provide a license; treat this as a
+private feasibility test only, not a distributable product.
+Only run this on a disposable build worker without credentials:
 PyTorch .pt checkpoints use pickle and must be treated as untrusted code.
 
 This script downloads a fixed Git blob, verifies its hash, inspects labels,
@@ -19,14 +21,14 @@ from pathlib import Path
 import certifi
 from ultralytics import YOLO
 
-REPO_COMMIT = "e4d852e2d7b2257568cb8e7c190a8691753270b1"
-CHECKPOINT_GIT_BLOB_SHA1 = "2d3d549196cde9446bcfce6c4e59d7e02b5fe104"
-CHECKPOINT_BYTES = 52009440
+REPO_COMMIT = "9a71f9e4ab9223bfa4d2aaf2ef63ba3781c229ce"
+CHECKPOINT_GIT_BLOB_SHA1 = "44f69ea57b0c6e8e2d5627bf2b51f8752d6c47d1"
+CHECKPOINT_BYTES = 22518115
 SOURCE = (
-    "https://raw.githubusercontent.com/HarshaaMg/Flying_Object_Detection/"
-    f"{REPO_COMMIT}/weights/refined_3class/best.pt"
+    "https://raw.githubusercontent.com/kaal-bhairav69/Drones_vs_Birds_detection/"
+    f"{REPO_COMMIT}/drone_vs_birds_detection/best%20%283%29.pt"
 )
-TARGET = Path("YOLOiOSApp/Models/Detect/yolo8m-birddrone.mlpackage")
+TARGET = Path("YOLOiOSApp/Models/Detect/yolo8s-birddrone.mlpackage")
 
 
 def verify_git_blob(path: Path):
@@ -43,10 +45,10 @@ def verify_git_blob(path: Path):
 
 
 def main():
-    checkpoint = Path(".bird_drone_model_cache/pretrained-best.pt")
+    checkpoint = Path(".bird_drone_model_cache/bird-drone-2025-best.pt")
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     if not checkpoint.exists():
-        print("Downloading pinned experimental bird/drone weights")
+        print("Downloading candidate bird/drone weights (unlicensed; testing only)")
         # Python.org's macOS Python may lack a configured system CA bundle.
         # Verify HTTPS with an explicitly trusted Mozilla CA bundle instead
         # of disabling certificate verification.
@@ -65,8 +67,8 @@ def main():
     model = YOLO(str(checkpoint))
     classes = [str(x).strip().lower() for x in model.names.values()]
     print("Checkpoint class names:", classes)
-    if not {"bird", "drone"}.issubset(classes) or len(classes) != 3:
-        raise RuntimeError("Expected exactly three classes, including bird and drone")
+    if set(classes) != {"bird", "drone"} or len(classes) != 2:
+        raise RuntimeError(f"Expected exactly bird/drone model labels; received {classes}")
 
     export_path = Path(str(model.export(format="coreml", imgsz=640, nms=False, device="cpu")))
     if export_path.suffix != ".mlpackage" or not export_path.is_dir():
