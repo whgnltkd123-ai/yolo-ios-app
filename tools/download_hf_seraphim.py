@@ -91,7 +91,8 @@ def main():
         for label in label_files[:50]:
             for line in label.read_text(encoding="utf-8").splitlines():
                 fields = line.split()
-                if fields and (len(fields) != 5 or fields[0] not in {"0", "0.0"}):
+                valid_shape = len(fields) == 5 or (len(fields) >= 7 and len(fields) % 2 == 1)
+                if fields and (not valid_shape or fields[0] not in {"0", "0.0"}):
                     raise ValueError(f"Unexpected YOLO label in {label}: {line}")
         print(f"{split}: {count} images, {len(label_files)} label files")
 
