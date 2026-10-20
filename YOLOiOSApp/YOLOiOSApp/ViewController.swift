@@ -28,6 +28,84 @@ let appTasks: [(name: String, shortName: String, folder: String, yoloTask: YOLOT
   ("OBB", "OBB", "Models/OBB", .obb),
 ]
 
+/// Three distinctive, locally generated alert sounds. No bundled audio assets or network needed.
+private final class DroneAlertSoundPlayer {
+  private var currentPlayer: AVAudioPlayer?
+  private var cachedTones: [Int: Data] = [:]
+
+  func play(stage: Int) {
+    guard (1...3).contains(stage) else { return }
+    let wav = cachedTones[stage] ?? Self.makeTone(stage: stage)
+    cachedTones[stage] = wav
+    do {
+      // The user explicitly enabled alerts: play through the speaker even in silent mode.
+      try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+      try AVAudioSession.sharedInstance().setActive(true)
+      currentPlayer?.stop()
+      currentPlayer = try AVAudioPlayer(data: wav)
+      currentPlayer?.volume = 0.8
+      currentPlayer?.prepareToPlay()
+      currentPlayer?.play()
+    } catch {
+      print("Drone alert audio unavailable: \(error)")
+    }
+  }
+
+  private static func makeTone(stage: Int) -> Data {
+    let sampleRate = 22_050
+    let duration = stage == 1 ? 0.48 : (stage == 2 ? 0.82 : 1.6)
+    let count = Int(Double(sampleRate) * duration)
+    let byteCount = count * 2
+    var wav = Data(capacity: 44 + byteCount)
+    func ascii(_ string: String) { wav.append(contentsOf: string.utf8) }
+    func le16(_ value: UInt16) {
+      wav.append(UInt8(truncatingIfNeeded: value))
+      wav.append(UInt8(truncatingIfNeeded: value >> 8))
+    }
+    func le32(_ value: UInt32) {
+      wav.append(UInt8(truncatingIfNeeded: value))
+      wav.append(UInt8(truncatingIfNeeded: value >> 8))
+      wav.append(UInt8(truncatingIfNeeded: value >> 16))
+      wav.append(UInt8(truncatingIfNeeded: value >> 24))
+    }
+    ascii("RIFF")
+    le32(UInt32(36 + byteCount))
+    ascii("WAVEfmt ")
+    le32(16)
+    le16(1) // mono PCM
+    le16(1)
+    le32(UInt32(sampleRate))
+    le32(UInt32(sampleRate * 2))
+    le16(2)
+    le16(16)
+    ascii("data")
+    le32(UInt32(byteCount))
+
+    var phase = 0.0
+    for index in 0..<count {
+      let t = Double(index) / Double(sampleRate)
+      let frequency: Double
+      let gate: Double
+      switch stage {
+      case 1: // Unknown: two quiet, short pulses
+        frequency = 630
+        gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.28 : 0
+      case 2: // Suspected: three medium warning pulses
+        frequency = 880
+        gate = Int(t / 0.23) < 3 && t.truncatingRemainder(dividingBy: 0.23) < 0.14 ? 0.48 : 0
+      default: // High-confidence model indication: alternating siren
+        frequency = 950 + 390 * sin(2 * .pi * 2.5 * t)
+        gate = 0.42
+      }
+      phase += 2 * .pi * frequency / Double(sampleRate)
+      let fade = min(1.0, min(t * 50, (duration - t) * 50))
+      let sample = Int16(max(-1, min(1, sin(phase) * gate * max(0, fade))) * 32767)
+      le16(UInt16(bitPattern: sample))
+    }
+    return wav
+  }
+}
+
 /// The main view controller for the YOLO iOS application, handling model selection and visualization.
 class ViewController: UIViewController, YOLOViewDelegate {
 
@@ -58,15 +136,23 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private var loadingOverlayView: UIView?
 
-  // MARK: - Bird-versus-drone alert (YOLO inference and camera are unchanged)
+  // MARK: - Stable bird/drone warning levels (experimental model estimates, not identity proof)
+  private enum DroneAlertStage: Int {
+    case none = 0
+    case unknown = 1
+    case suspected = 2
+    case high = 3
+  }
+
   private let droneAlertButton = UIButton(type: .system)
   private let droneAlertStatusLabel = UILabel()
+  private let droneAlertAudio = DroneAlertSoundPlayer()
   private var droneAlertEnabled = true
-  private var consecutiveDroneFrames = 0
+  private var droneCandidateFrames = 0
   private var previousDroneBox: CGRect?
-  private var lastDroneAlertTime: Date?
-  private let droneAlertCooldown: TimeInterval = 10
-  private let requiredConsecutiveDroneFrames = 3
+  private var recentDroneConfidence: [Float] = []
+  private var previousAlertStage: DroneAlertStage = .none
+  private var lastAlertByStage: [DroneAlertStage: Date] = [:]
 
   private func installDroneAlertControls() {
     let panel = UIStackView(arrangedSubviews: [droneAlertButton, droneAlertStatusLabel])
@@ -83,7 +169,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     droneAlertButton.addTarget(self, action: #selector(toggleDroneAlert), for: .touchUpInside)
     updateDroneAlertButton()
 
-    droneAlertStatusLabel.text = "새·드론 분류 모델 확인 중"
+    droneAlertStatusLabel.text = "새·드론 모델을 확인하는 중"
     droneAlertStatusLabel.textColor = .white
     droneAlertStatusLabel.font = .systemFont(ofSize: 12, weight: .medium)
     droneAlertStatusLabel.backgroundColor = UIColor.black.withAlphaComponent(0.76)
@@ -100,27 +186,28 @@ class ViewController: UIViewController, YOLOViewDelegate {
   }
 
   private func updateDroneAlertButton() {
-    droneAlertButton.setTitle(droneAlertEnabled ? "🚨 드론 경보 ON" : "🔕 드론 경보 OFF", for: .normal)
-    droneAlertButton.accessibilityLabel = droneAlertEnabled ? "드론 경보 끄기" : "드론 경보 켜기"
+    droneAlertButton.setTitle(droneAlertEnabled ? "🚨 3단계 경보 ON" : "🔕 3단계 경보 OFF", for: .normal)
+    droneAlertButton.accessibilityLabel = droneAlertEnabled ? "경보 끄기" : "경보 켜기"
   }
 
   private func resetDroneCandidate() {
-    consecutiveDroneFrames = 0
+    droneCandidateFrames = 0
     previousDroneBox = nil
+    recentDroneConfidence.removeAll(keepingCapacity: true)
+    previousAlertStage = .none
   }
 
   @objc private func toggleDroneAlert() {
     droneAlertEnabled.toggle()
     resetDroneCandidate()
     updateDroneAlertButton()
-    droneAlertStatusLabel.text = droneAlertEnabled ? "새·드론 분류 모델 확인 중" : "경보 꺼짐"
+    droneAlertStatusLabel.text = droneAlertEnabled ? "새·드론 모델 확인 중" : "경보 꺼짐"
   }
 
   private func isBirdClass(_ value: String) -> Bool {
     ["bird", "birds"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
   }
 
-  /// A drone-only model cannot be trusted to distinguish a bird from a drone.
   private func isDroneClass(_ value: String) -> Bool {
     let label = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     let droneClasses: Set<String> = [
@@ -131,29 +218,51 @@ class ViewController: UIViewController, YOLOViewDelegate {
   }
 
   private func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
-    let area = max(a.width * a.height + b.width * b.height - a.intersection(b).width * a.intersection(b).height, 0)
-    guard area > 0 else { return false }
     let intersection = a.intersection(b)
     guard !intersection.isNull else { return false }
-    return intersection.width * intersection.height / area >= 0.30
+    let union = a.width * a.height + b.width * b.height - intersection.width * intersection.height
+    return union > 0 && (intersection.width * intersection.height / union) >= 0.25
   }
 
   private func matchesPreviousDrone(_ rect: CGRect) -> Bool {
     guard let previous = previousDroneBox else { return false }
+    if overlaps(rect, previous) { return true }
     let dx = rect.midX - previous.midX
     let dy = rect.midY - previous.midY
-    return (dx * dx + dy * dy) <= (0.18 * 0.18) || overlaps(rect, previous)
+    // Much tighter than the previous 18%-of-screen rule; scale tolerance to target size.
+    let tolerance = max(CGFloat(0.025), min(CGFloat(0.085), max(rect.width, rect.height) * 1.5))
+    return (dx * dx + dy * dy) <= tolerance * tolerance
+  }
+
+  private func soundForStableStage(_ stage: DroneAlertStage) {
+    guard stage != .none else { return }
+    let cooldown: TimeInterval = stage == .unknown ? 30 : (stage == .suspected ? 16 : 10)
+    let now = Date()
+    guard lastAlertByStage[stage].map({ now.timeIntervalSince($0) >= cooldown }) ?? true
+    else { return }
+    lastAlertByStage[stage] = now
+    switch stage {
+    case .unknown:
+      UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    case .suspected:
+      UINotificationFeedbackGenerator().notificationOccurred(.warning)
+    case .high:
+      UINotificationFeedbackGenerator().notificationOccurred(.error)
+      AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+    case .none: break
+    }
+    droneAlertAudio.play(stage: stage.rawValue)
   }
 
   private func processDroneAlert(result: YOLOResult) {
     guard droneAlertEnabled else { return }
     guard currentTask == "Detect" else {
       resetDroneCandidate()
-      droneAlertStatusLabel.text = "Detect 모델을 선택하세요"
+      droneAlertStatusLabel.text = "탐지(Detect) 모델을 선택하세요"
       return
     }
 
-    // Do not arm audible alerts with drone-only or general-purpose models.
+    // Refuse to equate any ordinary moving object with a drone. Both labels must be present.
     guard result.names.contains(where: isBirdClass),
           result.names.contains(where: isDroneClass) else {
       resetDroneCandidate()
@@ -161,47 +270,66 @@ class ViewController: UIViewController, YOLOViewDelegate {
       return
     }
 
-    let threshold = max(Float(yoloView.sliderConf.value), 0.60)
-    let birds = result.boxes.filter { isBirdClass($0.cls) && $0.conf >= 0.45 }
+    let birds = result.boxes.filter { isBirdClass($0.cls) && $0.conf >= 0.40 }
+    let minimumConfidence = max(Float(yoloView.sliderConf.value), 0.30)
     let candidates = result.boxes
-      .filter { isDroneClass($0.cls) && $0.conf >= threshold }
+      .filter {
+        isDroneClass($0.cls) && $0.conf >= minimumConfidence
+          && $0.xywhn.width >= 0.003 && $0.xywhn.height >= 0.003
+      }
       .filter { candidate in
         !birds.contains(where: { bird in
-          bird.conf >= candidate.conf * 0.80 && overlaps(bird.xywhn, candidate.xywhn)
+          bird.conf >= candidate.conf * 0.75 && overlaps(bird.xywhn, candidate.xywhn)
         })
       }
-    let best = candidates.max(by: { $0.conf < $1.conf })
 
-    guard let candidate = best else {
+    guard let candidate = candidates.max(by: { $0.conf < $1.conf }) else {
       resetDroneCandidate()
       if let bird = birds.max(by: { $0.conf < $1.conf }) {
-        droneAlertStatusLabel.text = String(format: "🐦 새 탐지 %.0f%% · 경보 없음", bird.conf * 100)
-      } else if result.boxes.contains(where: { isDroneClass($0.cls) || isBirdClass($0.cls) }) {
-        droneAlertStatusLabel.text = "🟡 미확인 · 신뢰도 부족"
+        droneAlertStatusLabel.text = String(format: "🐦 새 후보 %.0f%% · 경보 없음", bird.conf * 100)
       } else {
-        droneAlertStatusLabel.text = "감시 중 · 탐지 대상 없음"
+        droneAlertStatusLabel.text = "감시 중 · 확인된 드론 후보 없음"
       }
       return
     }
 
-    consecutiveDroneFrames = matchesPreviousDrone(candidate.xywhn)
-      ? min(consecutiveDroneFrames + 1, requiredConsecutiveDroneFrames) : 1
+    if matchesPreviousDrone(candidate.xywhn) {
+      droneCandidateFrames = min(30, droneCandidateFrames + 1)
+    } else {
+      droneCandidateFrames = 1
+      recentDroneConfidence.removeAll(keepingCapacity: true)
+      previousAlertStage = .none
+    }
     previousDroneBox = candidate.xywhn
+    recentDroneConfidence.append(candidate.conf)
+    if recentDroneConfidence.count > 8 { recentDroneConfidence.removeFirst() }
+    let averageConfidence = recentDroneConfidence.reduce(Float(0), +)
+      / Float(recentDroneConfidence.count)
+    // Very small, dot-like regions must not be promoted to "high" solely by model score.
+    let hasResolvableShape = min(candidate.xywhn.width, candidate.xywhn.height) >= 0.02
 
-    guard consecutiveDroneFrames >= requiredConsecutiveDroneFrames else {
-      droneAlertStatusLabel.text = "🟡 드론 후보 검증 중 (\(consecutiveDroneFrames)/\(requiredConsecutiveDroneFrames))"
-      return
+    let stage: DroneAlertStage
+    if droneCandidateFrames >= 7 && averageConfidence >= 0.83
+      && candidate.conf >= 0.78 && hasResolvableShape {
+      stage = .high
+      droneAlertStatusLabel.text = String(
+        format: "🚨 드론 확신(모델 추정) %.0f%% · %d프레임", averageConfidence * 100, droneCandidateFrames)
+    } else if droneCandidateFrames >= 4 && averageConfidence >= 0.60
+      && candidate.conf >= 0.54 {
+      stage = .suspected
+      droneAlertStatusLabel.text = String(
+        format: "🟠 드론 의심 %.0f%% · %d프레임", averageConfidence * 100, droneCandidateFrames)
+    } else {
+      stage = .unknown
+      droneAlertStatusLabel.text = String(
+        format: "🟡 미확인 물체 %.0f%% · %d프레임", averageConfidence * 100, droneCandidateFrames)
     }
 
-    droneAlertStatusLabel.text = String(format: "🚨 드론 후보 %.0f%%", candidate.conf * 100)
-    let now = Date()
-    guard lastDroneAlertTime.map({ now.timeIntervalSince($0) >= droneAlertCooldown }) ?? true
-    else { return }
-    lastDroneAlertTime = now
-
-    UINotificationFeedbackGenerator().notificationOccurred(.warning)
-    AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
-    AudioServicesPlayAlertSound(SystemSoundID(1005))
+    // Unknown objects only generate their quieter alarm after tracking across multiple frames.
+    let stableEnoughToSound = stage != .unknown
+      || (droneCandidateFrames >= 3 && averageConfidence >= 0.40)
+    if stableEnoughToSound { soundForStableStage(stage) }
+    previousAlertStage = stage
   }
 
   // MARK: - Constants
@@ -730,6 +858,12 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
       if success {
         self.labelName.text = processString(modelName)
+        self.resetDroneCandidate()
+        if modelName.lowercased().contains("birddrone") {
+          // Experimental two-class model: retain modest-confidence candidates for temporal validation.
+          self.yoloView.setConfidenceThreshold(0.30)
+          self.yoloView.setNumItemsThreshold(30)
+        }
       }
       self.currentLoadingEntry = nil
       self.currentLoadingTask = nil
@@ -893,7 +1027,12 @@ extension ViewController {
 
   /// Renders the FPS line with the smaller stage-breakdown line beneath it in the single `labelFPS`,
   /// so the breakdown inherits the label's exact layout and show/hide behavior (e.g. camera switching).
+  private var lastPerformanceLabelDraw: CFTimeInterval = 0
+
   private func renderPerformanceLabel() {
+    let now = CACurrentMediaTime()
+    guard lastPerformanceLabelDraw == 0 || now - lastPerformanceLabelDraw >= 0.35 else { return }
+    lastPerformanceLabelDraw = now
     let rendered = NSMutableAttributedString(
       string: fpsText,
       attributes: [
