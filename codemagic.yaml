@@ -84,3 +84,51 @@ workflows:
       - build/YOLO-Bird-Drone-unsigned.ipa
       - build/DerivedData/Build/Products/Release-iphoneos/*.app
       - /tmp/xcodebuild_logs/*.log
+
+  yolo26-drone-alert:
+    name: YOLO26 Drone Alert - 3 Levels (trained model required, unsigned)
+    # Uses native YOLO26 detector architecture, not the previous YOLOv8s checkpoint.
+    # A user-trained bird/drone YOLO26n checkpoint is MANDATORY; never fake training.
+    # No signing secrets: download only a trusted checkpoint.
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      xcode: latest
+    scripts:
+      - name: Verify trained YOLO26 checkpoint and convert to Core ML
+        script: |
+          set -euo pipefail
+          : "${YOLO26_DRONE_CHECKPOINT_URL:?Set the HTTPS URL of your own trained YOLO26 bird/drone best.pt}"
+          : "${YOLO26_DRONE_CHECKPOINT_SHA256:?Set SHA256 for that exact best.pt}"
+          PYTHON="$(command -v python3.11 || command -v python3)"
+          "$PYTHON" -m venv "$CM_BUILD_DIR/.yolo26-drone-venv"
+          source "$CM_BUILD_DIR/.yolo26-drone-venv/bin/activate"
+          python -m pip install --upgrade pip
+          python -m pip install "ultralytics>=8.4,<9" "coremltools>=9,<11" "numpy<2.4" "certifi>=2025.4"
+          python tools/import_trained_yolo26_drone.py
+          test -f "YOLOiOSApp/Models/Detect/yolo26n-birddrone.mlpackage/Manifest.json"
+      - name: Build native YOLO26 iOS app with fine-tuned bird/drone weights
+        script: |
+          set -euo pipefail
+          xcodebuild \
+            -project "YOLOiOSApp/YOLOiOSApp.xcodeproj" \
+            -scheme "YOLOiOSApp" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$CM_BUILD_DIR/build/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Produce unsigned YOLO26 drone alert IPA for Windows Sideloadly
+        script: |
+          set -euo pipefail
+          APP="$CM_BUILD_DIR/build/DerivedData/Build/Products/Release-iphoneos/YOLOiOSApp.app"
+          test -d "$APP"
+          mkdir -p "$CM_BUILD_DIR/build/yolo26-drone-package/Payload"
+          cp -R "$APP" "$CM_BUILD_DIR/build/yolo26-drone-package/Payload/"
+          cd "$CM_BUILD_DIR/build/yolo26-drone-package"
+          /usr/bin/zip -qry "$CM_BUILD_DIR/build/YOLO26-Drone-Alert-unsigned.ipa" Payload
+    artifacts:
+      - build/YOLO26-Drone-Alert-unsigned.ipa
+      - build/DerivedData/Build/Products/Release-iphoneos/*.app
+      - /tmp/xcodebuild_logs/*.log
