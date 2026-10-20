@@ -82,6 +82,7 @@ python tools/train_yolo26_81.py --data /data/yolo26_81/data.yaml --epochs 60 --i
 - 학습 결과 `runs/yolo26-81/coco80-plus-drone/weights/best.pt` 및 `yolo26-81-validation.json` 확인이 필요합니다.
 - 별도 COCO 일반객체 영상·드론 현장 영상·새-only·빈 하늘 영상에서 개별 클래스 성능, 오탐, 미탐 및 iPhone FPS를 비교해야 합니다.
 - 80종이 보존되는지는 **클래스 이름과 실제 성능이 모두 유지될 때만** 주장할 수 있습니다. 81개 이름이 생겼다고 인식 품질이 유지되는 건 아닙니다.
+- 노트북은 `--coco-val-data`를 전달해 원본과 학습 모델을 동일한 COCO 검증 이미지로 비교합니다. 80종 평균 mAP50-95가 기본 0.03(3%포인트)보다 더 떨어지면 검증 단계가 실패하고 클래스별 감소량을 보고서에 남깁니다. 이 기준 통과는 모든 클래스의 성능 보존이나 현장 성능을 보장하지 않습니다.
 
 ## Codemagic에서 iOS IPA 만들기 (학습 가중치 준비 뒤에만)
 

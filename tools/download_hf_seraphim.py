@@ -60,7 +60,7 @@ def main():
     # HF has four giant train/image batch archives, one train/labels
     # archive, and one each for test images/labels. Avoid downloading the
     # 9.14GB repo when testing only one batch.
-    patterns = ["train/labels/*.zip", "test/images/*.zip", "test/labels/*.zip", "LICENSE"]
+    patterns = ["train/labels/*.zip", "test/images/*.zip", "test/labels/*.zip", "LICENSE", "README.md"]
     patterns += [f"train/images/batch_{i:03d}.zip" for i in range(1, args.train_batches + 1)]
     print("Downloading", REPO, "; train batches:", args.train_batches)
     print("A complete download needs several GB of free disk space.")

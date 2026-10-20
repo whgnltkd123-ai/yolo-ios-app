@@ -55,11 +55,11 @@ def main():
     parser.add_argument("--project", default="runs/yolo26-81")
     parser.add_argument("--resume", type=Path, help="Resume an interrupted run from its last.pt")
     parser.add_argument("--coco-val-data", type=Path, help="Optional ORIGINAL COCO-80 val data.yaml for retention check")
-    parser.add_argument("--max-coco-map-drop", type=float, default=0.15)
+    parser.add_argument("--max-coco-map-drop", type=float, default=0.03)
     args = parser.parse_args()
 
-    if args.epochs <= 0 or args.batch <= 0:
-        raise SystemExit("Epochs and batch must be positive")
+    if args.epochs <= 0 or args.batch <= 0 or not 0 <= args.max_coco_map_drop <= 1:
+        raise SystemExit("Epochs and batch must be positive; COCO drop must be between 0 and 1")
     model = YOLO("yolo26n.pt")
     reference_names = [str(model.names[i]) for i in range(80)]
     validate_joint_dataset(args.data.expanduser().resolve(), reference_names)
@@ -105,17 +105,39 @@ def main():
     print("Drone mAP50-95 (validation):", drone_map5095)
 
     baseline_map, trained_map = None, None
+    retention = {"status": "NOT VERIFIED"}
     if args.coco_val_data:
+        from ultralytics.data.utils import check_det_dataset
+
+        coco = check_det_dataset(str(args.coco_val_data), autodownload=False)
+        if parse_names(coco["names"]) != reference_names:
+            raise SystemExit("COCO retention dataset must use the original 80-class order.")
+        # Use precisely the same resolved validation images and settings for both models.
+        evaluation = {"path": str(coco["path"]), "train": coco["train"], "val": coco["val"]}
+        original_yaml = best.with_name("coco80-eval.yaml")
+        joint_yaml = best.with_name("coco81-eval.yaml")
+        original_yaml.write_text(yaml.safe_dump({**evaluation, "names": reference_names}), encoding="utf-8")
+        joint_yaml.write_text(yaml.safe_dump({**evaluation, "names": names}), encoding="utf-8")
         reference = YOLO("yolo26n.pt")
-        original_eval = reference.val(data=str(args.coco_val_data), device=args.device, imgsz=args.imgsz, split="val")
-        # YOLO with 81 output classes can't be evaluated directly against a
-        # COCO-80 class map with a mismatching 'names' list. Use per-class 81
-        # merged validation as an indicator; check retention independently.
-        baseline_map = float(original_eval.box.map)
-        trained_map = float(sum(class_maps[:80]) / 80) if len(class_maps) == 81 else None
+        original_eval = reference.val(data=str(original_yaml), device=args.device, imgsz=args.imgsz, split="val")
+        joint_eval = trained.val(data=str(joint_yaml), device=args.device, imgsz=args.imgsz, split="val")
+        if set(original_eval.box.ap_class_index) != set(range(80)) or set(joint_eval.box.ap_class_index) != set(range(80)):
+            raise SystemExit("Retention evaluation requires ground truth for all 80 COCO classes.")
+        baseline_map = float(sum(original_eval.box.maps[:80]) / 80)
+        trained_map = float(sum(joint_eval.box.maps[:80]) / 80)
+        retention = {
+            "status": "PASS" if baseline_map - trained_map <= args.max_coco_map_drop else "FAIL",
+            "baseline_map5095": baseline_map,
+            "trained_map5095": trained_map,
+            "maximum_allowed_drop": args.max_coco_map_drop,
+            "per_class_drop": {
+                name: float(original_eval.box.maps[i] - joint_eval.box.maps[i])
+                for i, name in enumerate(reference_names)
+            },
+            "scope": "Same COCO validation images only; not a field-performance guarantee.",
+        }
         print("Original YOLO26n COCO-80 mAP50-95:", baseline_map)
-        print("Fine-tuned COCO-80 mean per-class mAP50-95 (merged validation):", trained_map)
-        print("CAUTION: Different eval populations; numbers are NOT a valid like-for-like retention proof.")
+        print("Fine-tuned COCO-80 mAP50-95 on the same images:", trained_map)
 
     digest = hashlib.sha256(best.read_bytes()).hexdigest()
     manifest = {
@@ -125,7 +147,7 @@ def main():
         "validation_map50_81": float(scores.box.map50),
         "validation_drone_map5095": drone_map5095,
         "checkpoint_sha256": digest,
-        "preservation_of_original_80": "NOT VERIFIED; requires same-image per-class comparison on representative COCO.",
+        "preservation_of_original_80": retention,
         "real_iphone_false_alarms_and_fps": "NOT TESTED",
     }
     summary = best.with_name("yolo26-81-validation.json")
@@ -133,6 +155,8 @@ def main():
     print("TRAINED WEIGHTS:", best)
     print("SHA256:", digest)
     print("VALIDATION REPORT:", summary)
+    if retention["status"] == "FAIL":
+        raise SystemExit("COCO retention threshold failed. Keep the checkpoint for diagnosis; do not promote it.")
     print("Manual sign-off required before using this model for any safety-sensitive alerting.")
     print("Upload only the checkpoint you have rights to use to an accessible HTTPS URL for Codemagic.")
 
