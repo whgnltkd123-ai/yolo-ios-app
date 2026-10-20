@@ -294,7 +294,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private func updateAerialBoxesButton() {
     let aerialOnly = yoloView.showsOnlyAerialDetections
     aerialBoxesButton.setTitle(
-      aerialOnly ? "✈️ 공중 객체만 표시" : "📦 모든 객체 표시", for: .normal)
+      aerialOnly ? "공중 객체만 표시" : "모든 객체 표시", for: .normal)
     aerialBoxesButton.accessibilityLabel = aerialOnly
       ? "공중 객체만 표시 중. 전체 객체 표시하기"
       : "모든 객체 표시 중. 공중 객체만 표시하기"
@@ -306,7 +306,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
   }
 
   private func updateDroneAlertButton() {
-    droneAlertButton.setTitle(droneAlertEnabled ? "🚨 3단계 경보 ON" : "🔕 3단계 경보 OFF", for: .normal)
+    droneAlertButton.setTitle(droneAlertEnabled ? "경보 켜짐" : "경보 꺼짐", for: .normal)
     droneAlertButton.accessibilityLabel = droneAlertEnabled ? "경보 끄기" : "경보 켜기"
   }
 
@@ -419,7 +419,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     guard let candidate = candidates.max(by: { $0.conf < $1.conf }) else {
       resetDroneCandidate()
       if let other = otherAircraft.max(by: { $0.conf < $1.conf }) {
-        let label = isBirdClass(other.cls) ? "🐦 새 후보" : "✈️ 비행기 후보"
+        let label = isBirdClass(other.cls) ? "새 후보" : "비행기 후보"
         droneAlertStatusLabel.text = String(
           format: "%@ %.0f%% · 경보 없음", label, other.conf * 100)
       } else {
@@ -450,21 +450,21 @@ class ViewController: UIViewController, YOLOViewDelegate {
     let stage: DroneAlertStage
     if wingLikeMotion {
       stage = .unknown
-      droneAlertStatusLabel.text = "🟡 미확인 물체 · 날개짓 유사 움직임(실험)"
+      droneAlertStatusLabel.text = "미확인 물체 · 날개짓 유사 움직임(실험)"
     } else if isDroneClass(candidate.cls) && droneCandidateFrames >= 7 && averageConfidence >= 0.83
       && candidate.conf >= 0.78 && hasResolvableShape {
       stage = .high
       droneAlertStatusLabel.text = String(
-        format: "🚨 드론 확신(모델 추정) %.0f%% · %d프레임", averageConfidence * 100, droneCandidateFrames)
+        format: "드론 확신(모델 추정) %.0f%%", averageConfidence * 100)
     } else if isDroneClass(candidate.cls) && droneCandidateFrames >= 4 && averageConfidence >= 0.60
       && candidate.conf >= 0.60 && hasResolvableShape {
       stage = .suspected
       droneAlertStatusLabel.text = String(
-        format: "🟠 드론 의심 %.0f%% · %d프레임", averageConfidence * 100, droneCandidateFrames)
+        format: "드론 의심 %.0f%%", averageConfidence * 100)
     } else {
       stage = .unknown
       droneAlertStatusLabel.text = String(
-        format: "🟡 미확인 물체 %.0f%% · %d프레임", averageConfidence * 100, droneCandidateFrames)
+        format: "미확인 물체 %.0f%%", averageConfidence * 100)
     }
 
     // Unknown objects only generate their quieter alarm after tracking across multiple frames.
@@ -477,7 +477,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
   // MARK: - Constants
   private struct Constants {
     static let defaultTask = YOLOTask.detect
-    static let logoURL = "https://www.ultralytics.com"
     static let progressViewWidth: CGFloat = 200
   }
 
@@ -559,13 +558,12 @@ class ViewController: UIViewController, YOLOViewDelegate {
     }
 
     // Wire up gestures and delegates.
-    logoImage.isUserInteractionEnabled = true
-    logoImage.addGestureRecognizer(
-      UITapGestureRecognizer(target: self, action: #selector(logoButton)))
+    logoImage.isHidden = true
     yoloView.shareButton.addTarget(self, action: #selector(shareButtonTapped), for: .touchUpInside)
     yoloView.delegate = self
     installDroneAlertControls()
     [yoloView.labelName, yoloView.labelFPS, yoloView.labelBreakdown].forEach { $0?.isHidden = true }
+    [labelName, labelFPS, labelVersion].forEach { $0?.isHidden = true }
 
     // Observe slider changes to forward thresholds to an external display.
     yoloView.sliderConf.addTarget(self, action: #selector(sliderValueChanged), for: .valueChanged)
@@ -1035,13 +1033,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
     reloadModelEntriesAndLoadFirst(for: newTask)
   }
 
-  @objc func logoButton() {
-    selection.selectionChanged()
-    if let link = URL(string: Constants.logoURL) {
-      UIApplication.shared.open(link)
-    }
-  }
-
   private func setupModelSegmentedControl() {
     modelSegmentedControl.isHidden = false
     modelSegmentedControl.overrideUserInterfaceStyle = .dark
@@ -1097,15 +1088,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     loadingOverlayView?.frame = view.bounds
-    alignLogoWithThresholdSliders()
-  }
-
-  private func alignLogoWithThresholdSliders() {
-    guard logoImage != nil, yoloView != nil else { return }
-    let sliderMidY = (yoloView.sliderConf.frame.midY + yoloView.sliderIoU.frame.midY) / 2
-    guard sliderMidY.isFinite, sliderMidY > 0 else { return }
-
-    logoImage.center = CGPoint(x: logoImage.center.x, y: sliderMidY + 6)
   }
 
   @objc func shareButtonTapped() {
