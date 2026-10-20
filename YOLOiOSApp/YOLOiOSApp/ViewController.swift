@@ -145,6 +145,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     case high = 3
   }
 
+  private let aerialBoxesButton = UIButton(type: .system)
   private let droneAlertButton = UIButton(type: .system)
   private let droneAlertStatusLabel = UILabel()
   private let droneAlertAudio = DroneAlertSoundPlayer()
@@ -156,11 +157,19 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var lastAlertByStage: [DroneAlertStage: Date] = [:]
 
   private func installDroneAlertControls() {
-    let panel = UIStackView(arrangedSubviews: [droneAlertButton, droneAlertStatusLabel])
+    let panel = UIStackView(arrangedSubviews: [aerialBoxesButton, droneAlertButton, droneAlertStatusLabel])
     panel.axis = .vertical
     panel.alignment = .leading
     panel.spacing = 5
     panel.translatesAutoresizingMaskIntoConstraints = false
+
+    aerialBoxesButton.backgroundColor = UIColor.black.withAlphaComponent(0.76)
+    aerialBoxesButton.setTitleColor(.white, for: .normal)
+    aerialBoxesButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+    aerialBoxesButton.layer.cornerRadius = 8
+    aerialBoxesButton.contentEdgeInsets = UIEdgeInsets(top: 7, left: 10, bottom: 7, right: 10)
+    aerialBoxesButton.addTarget(self, action: #selector(toggleAerialBoxes), for: .touchUpInside)
+    updateAerialBoxesButton()
 
     droneAlertButton.backgroundColor = UIColor.black.withAlphaComponent(0.76)
     droneAlertButton.setTitleColor(.white, for: .normal)
@@ -184,6 +193,20 @@ class ViewController: UIViewController, YOLOViewDelegate {
       panel.topAnchor.constraint(equalTo: yoloView.safeAreaLayoutGuide.topAnchor, constant: 12),
       panel.widthAnchor.constraint(lessThanOrEqualTo: yoloView.widthAnchor, multiplier: 0.84),
     ])
+  }
+
+  private func updateAerialBoxesButton() {
+    let aerialOnly = yoloView.showsOnlyAerialDetections
+    aerialBoxesButton.setTitle(
+      aerialOnly ? "✈️ 공중 객체만 표시" : "📦 모든 객체 표시", for: .normal)
+    aerialBoxesButton.accessibilityLabel = aerialOnly
+      ? "공중 객체만 표시 중. 전체 객체 표시하기"
+      : "모든 객체 표시 중. 공중 객체만 표시하기"
+  }
+
+  @objc private func toggleAerialBoxes() {
+    yoloView.showsOnlyAerialDetections.toggle()
+    updateAerialBoxesButton()
   }
 
   private func updateDroneAlertButton() {
