@@ -144,8 +144,8 @@ workflows:
       - name: Verify trained 81-class model and export optimized Core ML
         script: |
           set -euo pipefail
-          : "\${YOLO26_81_CHECKPOINT_URL:?Set trained YOLO26n COCO80+drone HTTPS best.pt URL}"
-          : "\${YOLO26_81_CHECKPOINT_SHA256:?Set exact SHA256 of trained best.pt}"
+          : "${YOLO26_81_CHECKPOINT_URL:?Set trained YOLO26n COCO80+drone HTTPS best.pt URL}"
+          : "${YOLO26_81_CHECKPOINT_SHA256:?Set exact SHA256 of trained best.pt}"
           PYTHON="$(command -v python3.11 || command -v python3)"
           "$PYTHON" -m venv "$CM_BUILD_DIR/.yolo26-81-venv"
           source "$CM_BUILD_DIR/.yolo26-81-venv/bin/activate"
