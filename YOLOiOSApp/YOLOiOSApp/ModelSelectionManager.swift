@@ -34,12 +34,12 @@ struct ModelSelectionManager {
         if let char = sizeChar,
           let size = ModelSize(rawValue: String(char))
         {
-          // The optional 3-class pretrained model is bigger than nano (about 52MB).
-          // Give it the 'm' slot and do not overwrite it with the stock YOLO26m.
-          let isBirdDroneModel = baseName == "yolo8m-birddrone"
+          // The optional 3-class pretrained model is a two-class YOLOv8 candidate (~22.5MB).
+          // Give it the 'm' slot and do not overwrite it with the stock YOLO26s.
+          let isBirdDroneModel = baseName == "yolo8s-birddrone"
           let previouslySelected = standardModels[size]?.name.lowercased()
-            .hasPrefix("yolo8m-birddrone") ?? false
-          if size == .m && previouslySelected && !isBirdDroneModel {
+            .hasPrefix("yolo8s-birddrone") ?? false
+          if size == .s && previouslySelected && !isBirdDroneModel {
             continue
           }
           standardModels[size] = ModelInfo(
