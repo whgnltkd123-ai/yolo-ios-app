@@ -11,6 +11,41 @@
 - 도감으로 모은 기체 사진은 가까운 선명한 사진에 편향될 수 있습니다. 원거리 점상 드론, 역광, 산림 배경, FPV, 쿼드, 헥사, 고정익, 비행기, 새, 구름·전선·곤충 등 현장 사진도 별도로 모아야 합니다.
 - 연결된 GitHub의 `skywatch-web` 저장소에는 학습 이미지가 확인되지 않았습니다. 별도 Codex 프로젝트 URL 또는 이미지/라벨 ZIP이 있어야 실제 데이터를 검토할 수 있습니다.
 
+## Hugging Face에서 바로 확보 가능한 드론 정답 데이터
+
+**실제 검색으로 확인된 출처:** [Seraphim Drone Detection Dataset](https://huggingface.co/datasets/lgrzybowski/seraphim-drone-detection-dataset) (작성자 설명에 따르면 83,483장, YOLO 드론 1클래스 라벨, 640×640 이미지, 학습 75,134/시험 8,349, 약 9.14GB 압축, CC BY 4.0). 23개 출처를 모아 중복 제거했다고 하지만 이미지에는 실제 촬영 외 합성/광고 이미지가 섞이고 라벨 품질은 별도 수동 검증을 거치지 않았습니다. 출처별 사용 조건·저작자 표시 의무를 함께 확인하세요.
+
+이 데이터셋은 `drone`에 대한 실제 박스가 들어 있으므로 81종 학습 후보로 적합합니다. 그러나 **COCO 80종 데이터가 포함된 건 아닙니다.** COCO 2017 80종의 YOLO 정답 라벨도 별도로 준비해야 합니다.
+
+### Colab 또는 별도 GPU 학습 서버에서 드론 데이터 준비
+
+```bash
+pip install 'huggingface_hub>=0.28' pyyaml
+python tools/download_hf_seraphim.py --output /data/seraphim
+```
+
+- Hugging Face 원본은 `train/images/*.zip` 등 이미지·라벨이 압축 배치로 올라와 있습니다. 다운로드 스크립트가 순서대로 풀고 `data.yaml`(드론 클래스 0번)을 작성합니다.
+- 전체 압축 데이터만 약 9GB이므로 압축 해제용 추가 저장공간과 네트워크가 필요합니다. `--train-batches 1`은 일부만 다운로드하는 시범 확인용이며 최종 모델 성능을 증명하지 않습니다.
+- Seraphim은 `train`/`test`만 구분합니다. 스크립트는 `test`를 우선 **학습 도중 검증(val)** 에 활용합니다. 별도 독립 현장 테스트 영상은 반드시 남겨둬야 합니다.
+
+### 원본 80종과 함께 81종 데이터로 통합
+
+```bash
+python tools/prepare_yolo26_81_data.py \
+  --coco-root /data/coco \
+  --drone-root /data/seraphim \
+  --drone-yaml /data/seraphim/data.yaml \
+  --drone-valid-split test \
+  --output /data/yolo26_81
+```
+
+이어 기존 `tools/train_yolo26_81.py`로 별도 GPU 환경에서 학습, 학습된 `best.pt`의 SHA256 기록, Codemagic 81종 워크플로로 Core ML/IPA 변환을 합니다.
+
+### 대체 Hugging Face 데이터
+
+[pathikg/drone-detection-dataset](https://huggingface.co/datasets/pathikg/drone-detection-dataset)에도 이미지와 바운딩박스가 있으며 카드 표시는 MIT 라이선스입니다. 다만 이 자료는 Parquet 객체 구조이므로 위 ZIP 추출 스크립트를 그대로 적용할 수 없습니다. 데이터 필드와 사용권을 별도 검증해 변환해야 합니다.
+
+---
 ## 데이터셋 생성
 
 1. 본인이 이용·학습할 권한이 있는 COCO 2017 공식 YOLO 형식 이미지/라벨을 `images/train2017`, `labels/train2017`, `images/val2017`, `labels/val2017`로 준비합니다.
