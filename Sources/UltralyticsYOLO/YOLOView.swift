@@ -496,7 +496,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   func showBoxes(predictions: YOLOResult) {
     // Iterate directly without constructing a filtered array on every frame.
     // Inference still evaluates all of the original YOLO26 COCO object classes.
-    let isBirdDroneModel = modelName.lowercased().contains("birddrone")
+    let isBirdDroneModel = modelName.lowercased().contains("birddrone") || modelName.lowercased().contains("drone81")
     let maxVisible = min(50, boundingBoxViews.count)
     let viewSize = bounds.size
     var shown = 0
