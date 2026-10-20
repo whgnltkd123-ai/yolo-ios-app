@@ -469,11 +469,19 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   }
 
   func showBoxes(predictions: YOLOResult) {
-    let maxVisible = min(predictions.boxes.count, 50, boundingBoxViews.count)
+    // The experimental bird/drone model produces many weak point-like false detections.
+    // Keep lower-confidence candidates available to temporal alerts, but do not render
+    // every one as an authoritative drone rectangle.
+    let isBirdDroneModel = modelName.lowercased().contains("birddrone")
+    let visibleBoxes = predictions.boxes.filter { box in
+      guard isBirdDroneModel, box.cls.lowercased() == "drone" else { return true }
+      return box.conf >= 0.40 && min(box.xywhn.width, box.xywhn.height) >= 0.004
+    }
+    let maxVisible = min(visibleBoxes.count, 50, boundingBoxViews.count)
 
     let viewSize = bounds.size
     for i in 0..<maxVisible {
-      let prediction = predictions.boxes[i]
+      let prediction = visibleBoxes[i]
       let rect = aspectFillDisplayRect(
         for: prediction.xywhn,
         imageSize: predictions.orig_shape,
@@ -553,10 +561,13 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     let color: UIColor = birdClasses.contains(normalizedClass)
       ? .systemGreen
       : isDroneLabel
-        ? (confidence >= 0.60 ? .systemRed : .systemYellow)
+        ? (confidence >= 0.83 ? .systemRed : (confidence >= 0.60 ? .systemOrange : .systemYellow))
         : ultralyticsColors[classIndex % ultralyticsColors.count]
-    let localizedClass = birdClasses.contains(normalizedClass) ? "새"
-      : isDroneLabel ? "드론 후보" : className
+    // These are single-frame scores, not independently confirmed identities.
+    let localizedClass = birdClasses.contains(normalizedClass) ? "새 후보"
+      : isDroneLabel
+        ? (confidence >= 0.83 ? "드론 고점수 후보" : (confidence >= 0.60 ? "드론 의심" : "미확인 물체"))
+        : className
     let label = DetectionLabelStyle.text(className: localizedClass, confidence: confidence)
     let alpha = DetectionLabelStyle.alpha(confidence: confidence)
     boundingBoxViews[index].show(
