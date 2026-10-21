@@ -60,7 +60,7 @@ def main():
     # HF has four giant train/image batch archives, one train/labels
     # archive, and one each for test images/labels. Avoid downloading the
     # 9.14GB repo when testing only one batch.
-    patterns = ["train/labels/*.zip", "test/images/*.zip", "test/labels/*.zip", "LICENSE"]
+    patterns = ["train/labels/*.zip", "test/images/*.zip", "test/labels/*.zip", "LICENSE", "README.md"]
     patterns += [f"train/images/batch_{i:03d}.zip" for i in range(1, args.train_batches + 1)]
     print("Downloading", REPO, "; train batches:", args.train_batches)
     print("A complete download needs several GB of free disk space.")
@@ -91,7 +91,8 @@ def main():
         for label in label_files[:50]:
             for line in label.read_text(encoding="utf-8").splitlines():
                 fields = line.split()
-                if fields and (len(fields) != 5 or fields[0] not in {"0", "0.0"}):
+                valid_shape = len(fields) == 5 or (len(fields) >= 7 and len(fields) % 2 == 1)
+                if fields and (not valid_shape or fields[0] not in {"0", "0.0"}):
                     raise ValueError(f"Unexpected YOLO label in {label}: {line}")
         print(f"{split}: {count} images, {len(label_files)} label files")
 

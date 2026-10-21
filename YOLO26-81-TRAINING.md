@@ -1,6 +1,6 @@
 # YOLO26n / 81종 (COCO 80 + 드론) 학습·빌드 준비
 
-> 상태: **학습 스크립트와 클라우드 IPA 빌드 구성을 GitHub에 추가했지만, COCO+드론 실제 학습 데이터 및 완성된 81종 가중치가 없어 학습·81종 IPA 빌드는 아직 실행하지 못했습니다.**
+> 이 저장소는 학습·검증 및 IPA 빌드 도구를 제공합니다. **완성된 81종 모델이나 빌드 성공을 의미하지 않습니다.** 실제 체크포인트와 검증 보고서, Codemagic 빌드 결과를 각각 확인하세요.
 
 ## Codex에서 모은 드론 사진 재활용
 
@@ -63,6 +63,16 @@ python tools/prepare_yolo26_81_data.py --coco-root /data/coco --drone-root /data
 
 ## GPU 학습 (별도 GPU / Google Colab)
 
+Colab 노트북은 COCO의 사각형 라벨(`coco2017labels.zip`)을 받아 원본 박스를 유지합니다.
+Seraphim에 섞인 다각형 라벨은 해당 영역을 감싸는 사각형으로 변환하고 개수를 출력합니다.
+COCO 학습 이미지 다운로드 전에는 최소 45GiB, 검증 이미지 다운로드 전에는 4GiB의 여유 공간을 확인합니다.
+
+학습 전에 Google Drive 연결을 직접 승인하세요. 노트북의 학습 결과는
+`MyDrive/YOLO26-81-training/coco80-plus-drone`에 저장되며, 완료된 매 epoch의
+`weights/last.pt`로 다음 세션에서 이어 학습합니다. 세션이 끊기면 `/content`의
+데이터는 사라질 수 있으므로 데이터 준비 셀을 다시 실행해야 합니다.
+마지막 저장 이후 진행 중이던 epoch는 다시 계산됩니다. 무료 GPU 이용 시간은 보장되지 않습니다.
+
 ```bash
 pip install 'ultralytics>=8.4.142,<9' pyyaml
 python tools/train_yolo26_81.py --data /data/yolo26_81/data.yaml --epochs 60 --imgsz 640 --batch 8 --device 0
@@ -72,6 +82,7 @@ python tools/train_yolo26_81.py --data /data/yolo26_81/data.yaml --epochs 60 --i
 - 학습 결과 `runs/yolo26-81/coco80-plus-drone/weights/best.pt` 및 `yolo26-81-validation.json` 확인이 필요합니다.
 - 별도 COCO 일반객체 영상·드론 현장 영상·새-only·빈 하늘 영상에서 개별 클래스 성능, 오탐, 미탐 및 iPhone FPS를 비교해야 합니다.
 - 80종이 보존되는지는 **클래스 이름과 실제 성능이 모두 유지될 때만** 주장할 수 있습니다. 81개 이름이 생겼다고 인식 품질이 유지되는 건 아닙니다.
+- 노트북은 `--coco-val-data`를 전달해 원본과 학습 모델을 동일한 COCO 검증 이미지로 비교합니다. 80종 평균 mAP50-95가 기본 0.03(3%포인트)보다 더 떨어지면 검증 단계가 실패하고 클래스별 감소량을 보고서에 남깁니다. 이 기준 통과는 모든 클래스의 성능 보존이나 현장 성능을 보장하지 않습니다.
 
 ## Codemagic에서 iOS IPA 만들기 (학습 가중치 준비 뒤에만)
 

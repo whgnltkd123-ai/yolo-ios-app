@@ -32,9 +32,30 @@ let appTasks: [(name: String, shortName: String, folder: String, yoloTask: YOLOT
 private final class DroneAlertSoundPlayer {
   private var currentPlayer: AVAudioPlayer?
   private var cachedTones: [Int: Data] = [:]
+  private var currentStage: Int?
+  private var stopWhenResultsExpire: DispatchWorkItem?
+
+  deinit {
+    stopWhenResultsExpire?.cancel()
+    currentPlayer?.stop()
+  }
+
+  func stop() {
+    stopWhenResultsExpire?.cancel()
+    stopWhenResultsExpire = nil
+    currentPlayer?.stop()
+    currentPlayer = nil
+    currentStage = nil
+  }
 
   func play(stage: Int) {
     guard (1...3).contains(stage) else { return }
+    // A loop must expire if camera results stop arriving.
+    stopWhenResultsExpire?.cancel()
+    let expiry = DispatchWorkItem { [weak self] in self?.stop() }
+    stopWhenResultsExpire = expiry
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: expiry)
+    if currentStage == stage && currentPlayer?.isPlaying == true { return }
     let wav = cachedTones[stage] ?? Self.makeTone(stage: stage)
     cachedTones[stage] = wav
     do {
@@ -43,10 +64,13 @@ private final class DroneAlertSoundPlayer {
       try AVAudioSession.sharedInstance().setActive(true)
       currentPlayer?.stop()
       currentPlayer = try AVAudioPlayer(data: wav)
-      currentPlayer?.volume = 0.8
+      currentPlayer?.volume = 1.0
+      currentPlayer?.numberOfLoops = -1
+      currentStage = stage
       currentPlayer?.prepareToPlay()
       currentPlayer?.play()
     } catch {
+      stop()
       print("Drone alert audio unavailable: \(error)")
     }
   }
@@ -55,7 +79,9 @@ private final class DroneAlertSoundPlayer {
     let sampleRate = 22_050
     let duration = stage == 1 ? 0.48 : (stage == 2 ? 0.82 : 1.6)
     let count = Int(Double(sampleRate) * duration)
-    let byteCount = count * 2
+    // Keep a one-second silent gap between repeated alert patterns.
+    let silenceCount = sampleRate
+    let byteCount = (count + silenceCount) * 2
     var wav = Data(capacity: 44 + byteCount)
     func ascii(_ string: String) { wav.append(contentsOf: string.utf8) }
     func le16(_ value: UInt16) {
@@ -87,22 +113,111 @@ private final class DroneAlertSoundPlayer {
       let frequency: Double
       let gate: Double
       switch stage {
-      case 1: // Unknown: two quiet, short pulses
+      case 1: // Unknown: two short pulses
         frequency = 630
-        gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.28 : 0
+        gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.55 : 0
       case 2: // Suspected: three medium warning pulses
         frequency = 880
-        gate = Int(t / 0.23) < 3 && t.truncatingRemainder(dividingBy: 0.23) < 0.14 ? 0.48 : 0
+        gate = Int(t / 0.23) < 3 && t.truncatingRemainder(dividingBy: 0.23) < 0.14 ? 0.75 : 0
       default: // High-confidence model indication: alternating siren
         frequency = 950 + 390 * sin(2 * .pi * 2.5 * t)
-        gate = 0.42
+        gate = 0.80
       }
       phase += 2 * .pi * frequency / Double(sampleRate)
       let fade = min(1.0, min(t * 50, (duration - t) * 50))
       let sample = Int16(max(-1, min(1, sin(phase) * gate * max(0, fade))) * 32767)
       le16(UInt16(bitPattern: sample))
     }
+    wav.append(Data(count: silenceCount * 2))
     return wav
+  }
+}
+
+/// Experimental silhouette periodicity, not a bird classifier.
+/// Only uniform-background, resolved targets can provide evidence; missing evidence proves nothing.
+private struct WingMotionEvidence {
+  private var samples: [(time: Double, shape: Double)] = []
+  private var previousBox: CGRect?
+  private var evidenceUntil = 0.0
+
+  mutating func reset() {
+    samples.removeAll(keepingCapacity: true)
+    previousBox = nil
+    evidenceUntil = 0
+  }
+
+  mutating func update(image: UIImage?, box: CGRect, time: Double) -> Bool {
+    if let last = samples.last, time - last.time < 0.045 { return time < evidenceUntil }
+    guard let image, image.imageOrientation == .up, let source = image.cgImage,
+      box.width * CGFloat(source.width) >= 24, box.height * CGFloat(source.height) >= 24
+    else { reset(); return false }
+    if let previousBox {
+      let shift = hypot(box.midX - previousBox.midX, box.midY - previousBox.midY)
+      let scale = box.width * box.height / max(previousBox.width * previousBox.height, 0.000001)
+      if shift > max(box.width, box.height) * 0.3 || !(0.6...1.67).contains(scale)
+        || time - (samples.last?.time ?? time) > 0.12 {
+        reset()
+      }
+    }
+    previousBox = box
+    let width = CGFloat(source.width), height = CGFloat(source.height)
+    let side = max(box.width * width, box.height * height) * 1.4
+    let rect = CGRect(x: box.midX * width - side / 2, y: box.midY * height - side / 2,
+                      width: side, height: side).integral
+    guard CGRect(x: 0, y: 0, width: width, height: height).contains(rect),
+      let crop = source.cropping(to: rect)
+    else { reset(); return false }
+    var pixels = [UInt8](repeating: 0, count: 32 * 32)
+    let rendered = pixels.withUnsafeMutableBytes { bytes -> Bool in
+      guard let context = CGContext(
+        data: bytes.baseAddress, width: 32, height: 32, bitsPerComponent: 8,
+        bytesPerRow: 32, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: 0)
+      else { return false }
+      context.draw(crop, in: CGRect(x: 0, y: 0, width: 32, height: 32))
+      return true
+    }
+    guard rendered else { reset(); return false }
+    let border = (0..<1024).filter { $0 / 32 < 2 || $0 / 32 > 29 || $0 % 32 < 2 || $0 % 32 > 29 }
+      .map { Double(pixels[$0]) }
+    let background = border.reduce(0, +) / Double(border.count)
+    let variance = border.reduce(0) { $0 + pow($1 - background, 2) } / Double(border.count)
+    guard variance < 144 else { reset(); return false }
+    let foreground = (0..<1024).filter { abs(Double(pixels[$0]) - background) > 35 }
+    guard (20...500).contains(foreground.count) else { reset(); return false }
+    let count = Double(foreground.count)
+    let cx = foreground.reduce(0.0) { $0 + Double($1 % 32) } / count
+    let cy = foreground.reduce(0.0) { $0 + Double($1 / 32) } / count
+    guard (10...22).contains(cx), (10...22).contains(cy) else { reset(); return false }
+    let xx = foreground.reduce(0.0) { $0 + pow(Double($1 % 32) - cx, 2) }
+    let yy = foreground.reduce(0.0) { $0 + pow(Double($1 / 32) - cy, 2) }
+    samples.append((time, yy / max(xx + yy, 1)))
+    if samples.count > 64 { samples.removeFirst() }
+    guard samples.count >= 48, let first = samples.first, let last = samples.last else { return false }
+    let dt = (last.time - first.time) / Double(samples.count - 1)
+    guard dt > 0, zip(samples.dropFirst(), samples).allSatisfy({
+      let gap = $0.0.time - $0.1.time
+      return gap > dt * 0.5 && gap < dt * 1.5
+    }) else { return false }
+    let mean = samples.reduce(0.0) { $0 + $1.shape } / Double(samples.count)
+    let values = samples.map { $0.shape - mean }
+    guard values.reduce(0, { $0 + $1 * $1 }) / Double(values.count) > 0.0025 else { return false }
+    // At least three cycles, four samples per cycle, and alternating shape changes.
+    for lag in 4...(values.count / 3) {
+      let frequency = 1 / (Double(lag) * dt)
+      guard (1.5...6).contains(frequency) else { continue }
+      func correlation(_ offset: Int) -> Double {
+        let pairs = zip(values.dropFirst(offset), values.dropLast(offset))
+        let numerator = pairs.reduce(0.0) { $0 + $1.0 * $1.1 }
+        let energyA = values.dropFirst(offset).reduce(0.0) { $0 + $1 * $1 }
+        let energyB = values.dropLast(offset).reduce(0.0) { $0 + $1 * $1 }
+        return numerator / max(sqrt(energyA * energyB), 0.000001)
+      }
+      if correlation(lag) > 0.75 && correlation(lag / 2) < -0.35 {
+        evidenceUntil = time + 0.5
+        return true
+      }
+    }
+    return time < evidenceUntil
   }
 }
 
@@ -152,9 +267,10 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var droneAlertEnabled = true
   private var droneCandidateFrames = 0
   private var previousDroneBox: CGRect?
+  private var previousCandidateClass: String?
+  private var wingMotion = WingMotionEvidence()
   private var recentDroneConfidence: [Float] = []
   private var previousAlertStage: DroneAlertStage = .none
-  private var lastAlertByStage: [DroneAlertStage: Date] = [:]
 
   private func installDroneAlertControls() {
     let panel = UIStackView(arrangedSubviews: [aerialBoxesButton, droneAlertButton, droneAlertStatusLabel])
@@ -179,13 +295,14 @@ class ViewController: UIViewController, YOLOViewDelegate {
     droneAlertButton.addTarget(self, action: #selector(toggleDroneAlert), for: .touchUpInside)
     updateDroneAlertButton()
 
-    droneAlertStatusLabel.text = "새·드론 모델을 확인하는 중"
+    droneAlertStatusLabel.text = "드론·새·비행기 모델을 확인하는 중"
     droneAlertStatusLabel.textColor = .white
     droneAlertStatusLabel.font = .systemFont(ofSize: 12, weight: .medium)
     droneAlertStatusLabel.backgroundColor = UIColor.black.withAlphaComponent(0.76)
     droneAlertStatusLabel.layer.cornerRadius = 6
     droneAlertStatusLabel.clipsToBounds = true
     droneAlertStatusLabel.numberOfLines = 2
+    yoloView.capturesOriginalImage = droneAlertEnabled
 
     yoloView.addSubview(panel)
     NSLayoutConstraint.activate([
@@ -198,7 +315,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private func updateAerialBoxesButton() {
     let aerialOnly = yoloView.showsOnlyAerialDetections
     aerialBoxesButton.setTitle(
-      aerialOnly ? "✈️ 공중 객체만 표시" : "📦 모든 객체 표시", for: .normal)
+      aerialOnly ? "공중 객체만 표시" : "모든 객체 표시", for: .normal)
     aerialBoxesButton.accessibilityLabel = aerialOnly
       ? "공중 객체만 표시 중. 전체 객체 표시하기"
       : "모든 객체 표시 중. 공중 객체만 표시하기"
@@ -210,26 +327,36 @@ class ViewController: UIViewController, YOLOViewDelegate {
   }
 
   private func updateDroneAlertButton() {
-    droneAlertButton.setTitle(droneAlertEnabled ? "🚨 3단계 경보 ON" : "🔕 3단계 경보 OFF", for: .normal)
+    droneAlertButton.setTitle(droneAlertEnabled ? "경보 켜짐" : "경보 꺼짐", for: .normal)
     droneAlertButton.accessibilityLabel = droneAlertEnabled ? "경보 끄기" : "경보 켜기"
   }
 
   private func resetDroneCandidate() {
+    droneAlertAudio.stop()
     droneCandidateFrames = 0
     previousDroneBox = nil
+    previousCandidateClass = nil
+    wingMotion.reset()
     recentDroneConfidence.removeAll(keepingCapacity: true)
     previousAlertStage = .none
   }
 
   @objc private func toggleDroneAlert() {
     droneAlertEnabled.toggle()
+    yoloView.capturesOriginalImage = droneAlertEnabled && currentTask == "Detect"
+    if !droneAlertEnabled { droneAlertAudio.stop() }
     resetDroneCandidate()
     updateDroneAlertButton()
-    droneAlertStatusLabel.text = droneAlertEnabled ? "새·드론 모델 확인 중" : "경보 꺼짐"
+    droneAlertStatusLabel.text = droneAlertEnabled ? "드론·새·비행기 모델 확인 중" : "경보 꺼짐"
   }
 
   private func isBirdClass(_ value: String) -> Bool {
     ["bird", "birds"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+  }
+
+  private func isAirplaneClass(_ value: String) -> Bool {
+    ["airplane", "aeroplane", "plane"].contains(
+      value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
   }
 
   private func isDroneClass(_ value: String) -> Bool {
@@ -260,11 +387,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private func soundForStableStage(_ stage: DroneAlertStage) {
     guard stage != .none else { return }
-    let cooldown: TimeInterval = stage == .unknown ? 30 : (stage == .suspected ? 16 : 10)
-    let now = Date()
-    guard lastAlertByStage[stage].map({ now.timeIntervalSince($0) >= cooldown }) ?? true
-    else { return }
-    lastAlertByStage[stage] = now
+    droneAlertAudio.play(stage: stage.rawValue)
+    guard stage != previousAlertStage else { return }
     switch stage {
     case .unknown:
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -275,7 +399,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
       AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
     case .none: break
     }
-    droneAlertAudio.play(stage: stage.rawValue)
   }
 
   private func processDroneAlert(result: YOLOResult) {
@@ -294,72 +417,89 @@ class ViewController: UIViewController, YOLOViewDelegate {
       return
     }
 
-    let birds = result.boxes.filter { isBirdClass($0.cls) && $0.conf >= 0.40 }
+    let otherAircraft = result.boxes.filter {
+      (isBirdClass($0.cls) || isAirplaneClass($0.cls)) && $0.conf >= 0.60
+    }
     let minimumConfidence = max(Float(yoloView.sliderConf.value), 0.30)
     let candidates = result.boxes
       .filter {
-        isDroneClass($0.cls) && $0.conf >= minimumConfidence
-          && $0.xywhn.width >= 0.003 && $0.xywhn.height >= 0.003
+        let isUncertainAerial = (isBirdClass($0.cls) || isAirplaneClass($0.cls))
+          && $0.conf < 0.60
+        return (isDroneClass($0.cls) || isUncertainAerial) && $0.conf >= minimumConfidence
       }
       .filter { candidate in
-        !birds.contains(where: { bird in
-          bird.conf >= candidate.conf * 0.75 && overlaps(bird.xywhn, candidate.xywhn)
+        !otherAircraft.contains(where: { other in
+          other.conf >= candidate.conf * 0.75 && overlaps(other.xywhn, candidate.xywhn)
         })
       }
 
     guard let candidate = candidates.max(by: { $0.conf < $1.conf }) else {
       resetDroneCandidate()
-      if let bird = birds.max(by: { $0.conf < $1.conf }) {
-        droneAlertStatusLabel.text = String(format: "🐦 새 후보 %.0f%% · 경보 없음", bird.conf * 100)
+      if let other = otherAircraft.max(by: { $0.conf < $1.conf }) {
+        let label = isBirdClass(other.cls) ? "새 후보" : "비행기 후보"
+        droneAlertStatusLabel.text = String(
+          format: "%@ %.0f%% · 경보 없음", label, other.conf * 100)
       } else {
         droneAlertStatusLabel.text = "감시 중 · 확인된 드론 후보 없음"
       }
       return
     }
 
-    if matchesPreviousDrone(candidate.xywhn) {
+    if matchesPreviousDrone(candidate.xywhn) && previousCandidateClass == candidate.cls {
       droneCandidateFrames = min(30, droneCandidateFrames + 1)
     } else {
       droneCandidateFrames = 1
+      wingMotion.reset()
       recentDroneConfidence.removeAll(keepingCapacity: true)
       previousAlertStage = .none
     }
     previousDroneBox = candidate.xywhn
+    previousCandidateClass = candidate.cls
     recentDroneConfidence.append(candidate.conf)
     if recentDroneConfidence.count > 8 { recentDroneConfidence.removeFirst() }
     let averageConfidence = recentDroneConfidence.reduce(Float(0), +)
       / Float(recentDroneConfidence.count)
     // Very small, dot-like regions must not be promoted to "high" solely by model score.
     let hasResolvableShape = min(candidate.xywhn.width, candidate.xywhn.height) >= 0.02
+    let wingLikeMotion = wingMotion.update(
+      image: result.originalImage, box: candidate.xywhn, time: CACurrentMediaTime())
 
     let stage: DroneAlertStage
-    if droneCandidateFrames >= 7 && averageConfidence >= 0.83
-      && candidate.conf >= 0.78 && hasResolvableShape {
+    if wingLikeMotion {
+      stage = .unknown
+      droneAlertStatusLabel.text = "미확인 물체 · 날개짓 유사 움직임(실험)"
+    } else if isDroneClass(candidate.cls) && droneCandidateFrames >= 7 && averageConfidence >= 0.70
+      && candidate.conf >= 0.70 && hasResolvableShape {
       stage = .high
       droneAlertStatusLabel.text = String(
-        format: "🚨 드론 확신(모델 추정) %.0f%% · %d프레임", averageConfidence * 100, droneCandidateFrames)
-    } else if droneCandidateFrames >= 4 && averageConfidence >= 0.60
-      && candidate.conf >= 0.54 {
+        format: "드론 확신(모델 추정) %.0f%%", averageConfidence * 100)
+    } else if isDroneClass(candidate.cls)
+      && droneCandidateFrames >= (hasResolvableShape ? 4 : 8) && averageConfidence >= 0.60
+      && candidate.conf >= 0.60 {
       stage = .suspected
       droneAlertStatusLabel.text = String(
-        format: "🟠 드론 의심 %.0f%% · %d프레임", averageConfidence * 100, droneCandidateFrames)
+        format: hasResolvableShape ? "드론 의심 %.0f%%" : "드론 의심 · 작은 물체 사전 경보 %.0f%%",
+        averageConfidence * 100)
     } else {
       stage = .unknown
       droneAlertStatusLabel.text = String(
-        format: "🟡 미확인 물체 %.0f%% · %d프레임", averageConfidence * 100, droneCandidateFrames)
+        format: "미확인 물체 %.0f%%", averageConfidence * 100)
     }
 
     // Unknown objects only generate their quieter alarm after tracking across multiple frames.
     let stableEnoughToSound = stage != .unknown
-      || (droneCandidateFrames >= 3 && averageConfidence >= 0.40)
-    if stableEnoughToSound { soundForStableStage(stage) }
+      || (droneCandidateFrames >= 3 && averageConfidence >= minimumConfidence)
+    if stableEnoughToSound {
+      soundForStableStage(stage)
+    } else {
+      droneAlertAudio.stop()
+    }
     previousAlertStage = stage
   }
 
   // MARK: - Constants
   private struct Constants {
     static let defaultTask = YOLOTask.detect
-    static let logoURL = "https://www.ultralytics.com"
     static let progressViewWidth: CGFloat = 200
   }
 
@@ -401,6 +541,11 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var isLoadingModel = false
   private var currentLoadingTask: String?
 
+  override func viewWillDisappear(_ animated: Bool) {
+    super.viewWillDisappear(animated)
+    resetDroneCandidate()
+  }
+
   override func viewDidLoad() {
     super.viewDidLoad()
 
@@ -441,13 +586,12 @@ class ViewController: UIViewController, YOLOViewDelegate {
     }
 
     // Wire up gestures and delegates.
-    logoImage.isUserInteractionEnabled = true
-    logoImage.addGestureRecognizer(
-      UITapGestureRecognizer(target: self, action: #selector(logoButton)))
+    logoImage.isHidden = true
     yoloView.shareButton.addTarget(self, action: #selector(shareButtonTapped), for: .touchUpInside)
     yoloView.delegate = self
     installDroneAlertControls()
     [yoloView.labelName, yoloView.labelFPS, yoloView.labelBreakdown].forEach { $0?.isHidden = true }
+    [labelName, labelFPS, labelVersion].forEach { $0?.isHidden = true }
 
     // Observe slider changes to forward thresholds to an external display.
     yoloView.sliderConf.addTarget(self, action: #selector(sliderValueChanged), for: .valueChanged)
@@ -817,6 +961,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
         } == true)
 
       if success {
+        self.yoloView.capturesOriginalImage = self.droneAlertEnabled && loadedTask == "Detect"
         let previousTask = self.currentTask
         self.currentTask = loadedTask
         if let taskIndex = appTasks.firstIndex(where: { $0.name == loadedTask }) {
@@ -881,8 +1026,10 @@ class ViewController: UIViewController, YOLOViewDelegate {
       if success {
         self.labelName.text = processString(modelName)
         self.resetDroneCandidate()
-        if modelName.lowercased().contains("birddrone") || modelName.lowercased().contains("drone81") {
-          // Experimental two-class model: retain modest-confidence candidates for temporal validation.
+        if modelName.lowercased().contains("birddrone")
+          || modelName.lowercased().contains("drone81")
+          || modelName.lowercased().contains("aerial3") {
+          // Retain modest-confidence candidates for temporal validation.
           self.yoloView.setConfidenceThreshold(0.30)
           self.yoloView.setNumItemsThreshold(30)
         }
@@ -912,13 +1059,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
     }
 
     reloadModelEntriesAndLoadFirst(for: newTask)
-  }
-
-  @objc func logoButton() {
-    selection.selectionChanged()
-    if let link = URL(string: Constants.logoURL) {
-      UIApplication.shared.open(link)
-    }
   }
 
   private func setupModelSegmentedControl() {
@@ -976,15 +1116,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     loadingOverlayView?.frame = view.bounds
-    alignLogoWithThresholdSliders()
-  }
-
-  private func alignLogoWithThresholdSliders() {
-    guard logoImage != nil, yoloView != nil else { return }
-    let sliderMidY = (yoloView.sliderConf.frame.midY + yoloView.sliderIoU.frame.midY) / 2
-    guard sliderMidY.isFinite, sliderMidY > 0 else { return }
-
-    logoImage.center = CGPoint(x: logoImage.center.x, y: sliderMidY + 6)
   }
 
   @objc func shareButtonTapped() {

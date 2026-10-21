@@ -60,16 +60,28 @@ def read_boxes(path: Path, mapping: dict[int, int], counters: collections.Counte
         fields = raw.split()
         if not fields:
             continue
-        if len(fields) != 5:
-            raise ValueError(f"Invalid detection label (expected cls cx cy w h): {path}:{line_number}")
-        source_class = int(fields[0])
+        if len(fields) != 5 and not (len(fields) >= 7 and len(fields) % 2 == 1):
+            raise ValueError(f"Expected a YOLO box or polygon: {path}:{line_number}")
+        class_value = float(fields[0])
+        if not class_value.is_integer():
+            raise ValueError(f"Non-integral class id in {path}:{line_number}")
+        source_class = int(class_value)
         if source_class not in mapping:
             raise ValueError(f"Unknown source class {source_class} in {path}")
         numbers = [float(value) for value in fields[1:]]
-        if any(not (0 <= value <= 1) for value in numbers) or numbers[2] <= 0 or numbers[3] <= 0:
+        if any(not (0 <= value <= 1) for value in numbers):
             raise ValueError(f"Invalid normalized box in {path}:{line_number}")
+        if len(fields) != 5:
+            # Some Seraphim labels are YOLO segmentation polygons. Preserve each
+            # annotated object as its enclosing detection box; never drop it.
+            xs, ys = numbers[::2], numbers[1::2]
+            x1, x2, y1, y2 = min(xs), max(xs), min(ys), max(ys)
+            numbers = [(x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1]
+            counters["polygons_converted"] += 1
+        if numbers[2] <= 0 or numbers[3] <= 0:
+            raise ValueError(f"Degenerate box in {path}:{line_number}")
         destination_class = mapping[source_class]
-        lines.append(str(destination_class) + " " + " ".join(fields[1:]))
+        lines.append(str(destination_class) + " " + " ".join(format(value, ".12g") for value in numbers))
         counters[destination_class] += 1
     return ("\n".join(lines) + "\n") if lines else ""
 
@@ -159,7 +171,10 @@ def main():
                 f"{split} has no annotations for classes: {missing}; drone count={count[80]}. "
                 "Use COCO train2017/val2017 (not COCO8) and a labeled drone split."
             )
-        summary[split] = {"coco_images": coco_total, "drone_images": drone_total, "drone_boxes": count[80]}
+        summary[split] = {
+            "coco_images": coco_total, "drone_images": drone_total,
+            "drone_boxes": count[80], "polygons_converted": count["polygons_converted"],
+        }
     merged = {
         "path": str(output),
         "train": "images/train",

@@ -119,6 +119,13 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
 
   public var onDetection: ((YOLOResult) -> Void)?
 
+  /// Opt-in source frames for consumers performing temporal image analysis.
+  public var capturesOriginalImage = false {
+    didSet {
+      (videoCapture.predictor as? BasePredictor)?.capturesOriginalImage = capturesOriginalImage
+    }
+  }
+
   /// Keep the original 80-class YOLO26 inference fully intact while showing only
   /// flying-object detection boxes. This only reduces UI overlay work, not model FLOPs.
   /// The original COCO model has bird/airplane/kite, but NOT a drone class.
@@ -177,8 +184,6 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   private var maskLayer: CALayer?
   private var poseLayer: CALayer?
 
-  private let minimumZoom: CGFloat = 1.0
-  private let maximumZoom: CGFloat = 10.0
   private var lastZoomFactor: CGFloat = 1.0
   private var pausedShareImage: UIImage?
   private var pausedImageView: UIImageView?
@@ -272,6 +277,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
         self.activityIndicator.stopAnimating()
         switch result {
         case .success(let predictor):
+          predictor.capturesOriginalImage = self.capturesOriginalImage
           self.videoCapture.predictor = predictor
           predictor.setNumItemsThreshold(numItems: self.getNumItemsThreshold())
           self.labelName.text = processString(self.modelName)
@@ -484,8 +490,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   private func isAerialDetectionClass(_ label: String) -> Bool {
     let name = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     let aerialClasses: Set<String> = [
-      "bird", "birds", "airplane", "aeroplane", "aircraft", "plane",
-      "kite", "helicopter", "glider", "balloon", "hot air balloon",
+      "bird", "birds", "airplane", "aeroplane", "plane",
       "drone", "drones", "uav", "uas", "quadcopter", "hexacopter",
       "multicopter", "fpv drone", "fpv-drone", "fixed wing", "fixed-wing",
       "unmanned aerial vehicle",
@@ -495,7 +500,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
 
   func showBoxes(predictions: YOLOResult) {
     // Iterate directly without constructing a filtered array on every frame.
-    // Inference still evaluates all of the original YOLO26 COCO object classes.
+    // Inference still evaluates every class provided by the selected model.
     let isBirdDroneModel = modelName.lowercased().contains("birddrone") || modelName.lowercased().contains("drone81")
     let maxVisible = min(50, boundingBoxViews.count)
     let viewSize = bounds.size
@@ -569,7 +574,8 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       className: prediction.cls,
       confidence: CGFloat(prediction.conf),
       classIndex: prediction.index,
-      frame: frame
+      frame: frame,
+      smallTarget: min(prediction.xywhn.width, prediction.xywhn.height) < 0.02
     )
   }
 
@@ -580,26 +586,34 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     confidence: CGFloat,
     classIndex: Int,
     frame: CGRect,
+    smallTarget: Bool = false,
     angle: CGFloat? = nil
   ) {
     // Bird/drone separation is visible immediately; all other classes retain original YOLO colors.
     let normalizedClass = className.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     let birdClasses: Set<String> = ["bird", "birds"]
+    let airplaneClasses: Set<String> = ["airplane", "aeroplane", "plane"]
     let droneClasses: Set<String> = [
       "drone", "drones", "uav", "uas", "quadcopter", "multicopter",
       "fpv drone", "fpv-drone", "unmanned aerial vehicle", "fixed-wing", "fixed wing",
     ]
     let isDroneLabel = droneClasses.contains(normalizedClass)
       || normalizedClass.hasPrefix("drone ") || normalizedClass.hasSuffix(" drone")
-    let color: UIColor = birdClasses.contains(normalizedClass)
+    let isUncertain = (birdClasses.contains(normalizedClass)
+      || airplaneClasses.contains(normalizedClass) || isDroneLabel)
+      && (confidence < 0.60 || (isDroneLabel && smallTarget))
+    let color: UIColor = isUncertain ? .systemYellow : birdClasses.contains(normalizedClass)
       ? .systemGreen
+      : airplaneClasses.contains(normalizedClass) ? .systemBlue
       : isDroneLabel
-        ? (confidence >= 0.83 ? .systemRed : (confidence >= 0.60 ? .systemOrange : .systemYellow))
+        ? (confidence >= 0.70 ? .systemRed : (confidence >= 0.60 ? .systemOrange : .systemYellow))
         : ultralyticsColors[classIndex % ultralyticsColors.count]
     // These are single-frame scores, not independently confirmed identities.
-    let localizedClass = birdClasses.contains(normalizedClass) ? "새 후보"
+    let localizedClass = isUncertain ? "미확인 물체"
+      : birdClasses.contains(normalizedClass) ? "새 후보"
+      : airplaneClasses.contains(normalizedClass) ? "비행기 후보"
       : isDroneLabel
-        ? (confidence >= 0.83 ? "드론 고점수 후보" : (confidence >= 0.60 ? "드론 의심" : "미확인 물체"))
+        ? (confidence >= 0.70 ? "드론 고점수 후보" : (confidence >= 0.60 ? "드론 의심" : "미확인 물체"))
         : className
     let label = DetectionLabelStyle.text(className: localizedClass, confidence: confidence)
     let alpha = DetectionLabelStyle.alpha(confidence: confidence)
@@ -1085,7 +1099,9 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
 
     // Return zoom value between the minimum and maximum zoom values
     func minMaxZoom(_ factor: CGFloat) -> CGFloat {
-      return min(min(max(factor, minimumZoom), maximumZoom), device.activeFormat.videoMaxZoomFactor)
+      return min(
+        max(factor, device.minAvailableVideoZoomFactor),
+        min(device.maxAvailableVideoZoomFactor, device.activeFormat.videoMaxZoomFactor))
     }
 
     func update(scale factor: CGFloat) {
@@ -1266,7 +1282,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       self.selectedLensDeviceID = device.position == .back ? device.uniqueID : nil
       let rawZoomFactor =
         zoomFactor(for: device, on: activeDevice)
-        ?? min(max(activeDevice.videoZoomFactor, self.minimumZoom), self.maximumZoom)
+        ?? activeDevice.videoZoomFactor
       self.lastZoomFactor = rawZoomFactor
       self.labelZoom.text = self.zoomLabelText(rawZoomFactor: rawZoomFactor, device: activeDevice)
       // Switching the camera input drops the torch (the new device may not have one); sync the chip
