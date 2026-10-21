@@ -601,19 +601,19 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       || normalizedClass.hasPrefix("drone ") || normalizedClass.hasSuffix(" drone")
     let isUncertain = (birdClasses.contains(normalizedClass)
       || airplaneClasses.contains(normalizedClass) || isDroneLabel)
-      && (confidence < 0.60 || smallTarget)
+      && (confidence < 0.60 || (isDroneLabel && smallTarget))
     let color: UIColor = isUncertain ? .systemYellow : birdClasses.contains(normalizedClass)
       ? .systemGreen
       : airplaneClasses.contains(normalizedClass) ? .systemBlue
       : isDroneLabel
-        ? (confidence >= 0.83 ? .systemRed : (confidence >= 0.60 ? .systemOrange : .systemYellow))
+        ? (confidence >= 0.70 ? .systemRed : (confidence >= 0.60 ? .systemOrange : .systemYellow))
         : ultralyticsColors[classIndex % ultralyticsColors.count]
     // These are single-frame scores, not independently confirmed identities.
     let localizedClass = isUncertain ? "미확인 물체"
       : birdClasses.contains(normalizedClass) ? "새 후보"
       : airplaneClasses.contains(normalizedClass) ? "비행기 후보"
       : isDroneLabel
-        ? (confidence >= 0.83 ? "드론 고점수 후보" : (confidence >= 0.60 ? "드론 의심" : "미확인 물체"))
+        ? (confidence >= 0.70 ? "드론 고점수 후보" : (confidence >= 0.60 ? "드론 의심" : "미확인 물체"))
         : className
     let label = DetectionLabelStyle.text(className: localizedClass, confidence: confidence)
     let alpha = DetectionLabelStyle.alpha(confidence: confidence)

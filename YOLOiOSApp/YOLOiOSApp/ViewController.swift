@@ -419,13 +419,12 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
     let otherAircraft = result.boxes.filter {
       (isBirdClass($0.cls) || isAirplaneClass($0.cls)) && $0.conf >= 0.60
-        && min($0.xywhn.width, $0.xywhn.height) >= 0.02
     }
     let minimumConfidence = max(Float(yoloView.sliderConf.value), 0.30)
     let candidates = result.boxes
       .filter {
         let isUncertainAerial = (isBirdClass($0.cls) || isAirplaneClass($0.cls))
-          && ($0.conf < 0.60 || min($0.xywhn.width, $0.xywhn.height) < 0.02)
+          && $0.conf < 0.60
         return (isDroneClass($0.cls) || isUncertainAerial) && $0.conf >= minimumConfidence
       }
       .filter { candidate in
@@ -469,8 +468,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
     if wingLikeMotion {
       stage = .unknown
       droneAlertStatusLabel.text = "미확인 물체 · 날개짓 유사 움직임(실험)"
-    } else if isDroneClass(candidate.cls) && droneCandidateFrames >= 7 && averageConfidence >= 0.83
-      && candidate.conf >= 0.78 && hasResolvableShape {
+    } else if isDroneClass(candidate.cls) && droneCandidateFrames >= 7 && averageConfidence >= 0.70
+      && candidate.conf >= 0.70 && hasResolvableShape {
       stage = .high
       droneAlertStatusLabel.text = String(
         format: "드론 확신(모델 추정) %.0f%%", averageConfidence * 100)
