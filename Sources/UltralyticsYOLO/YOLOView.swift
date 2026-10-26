@@ -13,7 +13,7 @@ import AVFoundation
 import UIKit
 import Vision
 
-func aspectFillDisplayRect(for normalizedRect: CGRect, imageSize: CGSize, viewSize: CGSize)
+public func aspectFillDisplayRect(for normalizedRect: CGRect, imageSize: CGSize, viewSize: CGSize)
   -> CGRect
 {
   guard imageSize.width > 0, imageSize.height > 0, viewSize.width > 0, viewSize.height > 0 else {
@@ -118,6 +118,12 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   }
 
   public var onDetection: ((YOLOResult) -> Void)?
+
+  /// Changes when camera projection changes; consumers must not carry object IDs across it.
+  public var trackingCameraContext: String {
+    let device = videoCapture.captureDevice
+    return "\(device?.uniqueID ?? "none"):\(device?.videoZoomFactor ?? 1):\(modelName)"
+  }
 
   /// Opt-in source frames for consumers performing temporal image analysis.
   public var capturesOriginalImage = false {
@@ -601,19 +607,19 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       || normalizedClass.hasPrefix("drone ") || normalizedClass.hasSuffix(" drone")
     let isUncertain = (birdClasses.contains(normalizedClass)
       || airplaneClasses.contains(normalizedClass) || isDroneLabel)
-      && (confidence < 0.60 || (isDroneLabel && smallTarget))
+      && (confidence < (isDroneLabel ? 0.70 : 0.60) || (isDroneLabel && smallTarget))
     let color: UIColor = isUncertain ? .systemYellow : birdClasses.contains(normalizedClass)
       ? .systemGreen
       : airplaneClasses.contains(normalizedClass) ? .systemBlue
       : isDroneLabel
-        ? (confidence >= 0.70 ? .systemRed : (confidence >= 0.60 ? .systemOrange : .systemYellow))
+        ? .systemRed
         : ultralyticsColors[classIndex % ultralyticsColors.count]
     // These are single-frame scores, not independently confirmed identities.
     let localizedClass = isUncertain ? "미확인 물체"
-      : birdClasses.contains(normalizedClass) ? "새 후보"
+      : birdClasses.contains(normalizedClass) ? "새"
       : airplaneClasses.contains(normalizedClass) ? "비행기 후보"
       : isDroneLabel
-        ? (confidence >= 0.70 ? "드론 고점수 후보" : (confidence >= 0.60 ? "드론 의심" : "미확인 물체"))
+        ? "드론"
         : className
     let label = DetectionLabelStyle.text(className: localizedClass, confidence: confidence)
     let alpha = DetectionLabelStyle.alpha(confidence: confidence)

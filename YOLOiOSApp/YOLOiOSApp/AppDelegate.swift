@@ -12,7 +12,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
   ) -> Bool {
     UIApplication.shared.isIdleTimerDisabled = true
     ExternalDisplayManager.registerDefaults()
+    RemoteDroneAlerts.shared.restoreRegistration()
     return true
+  }
+
+  func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+    RemoteDroneAlerts.shared.registered(token: deviceToken)
+  }
+
+  func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+    RemoteDroneAlerts.shared.registrationFailed(error)
   }
 
   func application(

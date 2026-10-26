@@ -28,7 +28,7 @@ let appTasks: [(name: String, shortName: String, folder: String, yoloTask: YOLOT
   ("OBB", "OBB", "Models/OBB", .obb),
 ]
 
-/// Three distinctive, locally generated alert sounds. No bundled audio assets or network needed.
+/// Locally generated unknown/drone alert sounds. No bundled audio assets or network needed.
 private final class DroneAlertSoundPlayer {
   private var currentPlayer: AVAudioPlayer?
   private var cachedTones: [Int: Data] = [:]
@@ -49,7 +49,7 @@ private final class DroneAlertSoundPlayer {
   }
 
   func play(stage: Int) {
-    guard (1...3).contains(stage) else { return }
+    guard stage == 1 || stage == 3 else { return }
     // A loop must expire if camera results stop arriving.
     stopWhenResultsExpire?.cancel()
     let expiry = DispatchWorkItem { [weak self] in self?.stop() }
@@ -77,7 +77,7 @@ private final class DroneAlertSoundPlayer {
 
   private static func makeTone(stage: Int) -> Data {
     let sampleRate = 22_050
-    let duration = stage == 1 ? 0.48 : (stage == 2 ? 0.82 : 1.6)
+    let duration = stage == 1 ? 0.48 : 1.6
     let count = Int(Double(sampleRate) * duration)
     // Keep a one-second silent gap between repeated alert patterns.
     let silenceCount = sampleRate
@@ -116,9 +116,6 @@ private final class DroneAlertSoundPlayer {
       case 1: // Unknown: two short pulses
         frequency = 630
         gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.55 : 0
-      case 2: // Suspected: three medium warning pulses
-        frequency = 880
-        gate = Int(t / 0.23) < 3 && t.truncatingRemainder(dividingBy: 0.23) < 0.14 ? 0.75 : 0
       default: // High-confidence model indication: alternating siren
         frequency = 950 + 390 * sin(2 * .pi * 2.5 * t)
         gate = 0.80
@@ -256,7 +253,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private enum DroneAlertStage: Int, Hashable {
     case none = 0
     case unknown = 1
-    case suspected = 2
     case high = 3
   }
 
@@ -271,9 +267,30 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var wingMotion = WingMotionEvidence()
   private var recentDroneConfidence: [Float] = []
   private var previousAlertStage: DroneAlertStage = .none
+  private let monitoringButton = UIButton(type: .system)
+  private let monitoringStatusLabel = UILabel()
+  private let trackingOverlay = AerialTrackOverlay()
+  private var tracker = AerialTracker()
+  private var trackingContext = ""
+  private var trackWingEvidence: [Int: WingMotionEvidence] = [:]
+  private var featureTracks: [AerialTrack] = []
+  private let evidenceStore = AerialEvidenceStore()
+  private var trackingEnabled = UserDefaults.standard.bool(forKey: "aerial.tracking")
+  private var evidenceEnabled = UserDefaults.standard.bool(forKey: "aerial.evidence")
+  // Sending to others always starts off for each app launch.
+  private var broadcastEnabled = false
+  private var resultsExpiry: DispatchWorkItem?
+  private var usesFeatureTracking: Bool { trackingEnabled || evidenceEnabled || broadcastEnabled }
 
   private func installDroneAlertControls() {
-    let panel = UIStackView(arrangedSubviews: [aerialBoxesButton, droneAlertButton, droneAlertStatusLabel])
+    trackingOverlay.backgroundColor = .clear
+    trackingOverlay.isUserInteractionEnabled = false
+    trackingOverlay.frame = yoloView.bounds
+    trackingOverlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    trackingOverlay.isHidden = !trackingEnabled
+    yoloView.addSubview(trackingOverlay)
+    let panel = UIStackView(arrangedSubviews: [aerialBoxesButton, droneAlertButton,
+      monitoringButton, droneAlertStatusLabel, monitoringStatusLabel])
     panel.axis = .vertical
     panel.alignment = .leading
     panel.spacing = 5
@@ -302,7 +319,21 @@ class ViewController: UIViewController, YOLOViewDelegate {
     droneAlertStatusLabel.layer.cornerRadius = 6
     droneAlertStatusLabel.clipsToBounds = true
     droneAlertStatusLabel.numberOfLines = 2
-    yoloView.capturesOriginalImage = droneAlertEnabled
+    monitoringButton.setTitle("추적 · 채증 · 가입자 알림", for: .normal)
+    monitoringButton.setTitleColor(.white, for: .normal)
+    monitoringButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+    monitoringButton.backgroundColor = UIColor.black.withAlphaComponent(0.76)
+    monitoringButton.layer.cornerRadius = 8
+    monitoringButton.contentEdgeInsets = UIEdgeInsets(top: 7, left: 10, bottom: 7, right: 10)
+    monitoringButton.addTarget(self, action: #selector(showMonitoringSettings), for: .touchUpInside)
+    monitoringStatusLabel.textColor = .white
+    monitoringStatusLabel.font = .systemFont(ofSize: 11)
+    monitoringStatusLabel.backgroundColor = UIColor.black.withAlphaComponent(0.76)
+    monitoringStatusLabel.numberOfLines = 2
+    RemoteDroneAlerts.shared.statusChanged = { [weak self] text in self?.monitoringStatusLabel.text = text }
+    NotificationCenter.default.addObserver(self, selector: #selector(clearFeatureTracking),
+      name: UIApplication.willResignActiveNotification, object: nil)
+    applyMonitoringSettings()
 
     yoloView.addSubview(panel)
     NSLayoutConstraint.activate([
@@ -343,11 +374,143 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   @objc private func toggleDroneAlert() {
     droneAlertEnabled.toggle()
-    yoloView.capturesOriginalImage = droneAlertEnabled && currentTask == "Detect"
+    applyMonitoringSettings()
     if !droneAlertEnabled { droneAlertAudio.stop() }
     resetDroneCandidate()
     updateDroneAlertButton()
     droneAlertStatusLabel.text = droneAlertEnabled ? "드론·새·비행기 모델 확인 중" : "경보 꺼짐"
+  }
+
+  private func applyMonitoringSettings() {
+    yoloView.capturesOriginalImage = droneAlertEnabled || usesFeatureTracking
+    yoloView.showOverlays = !(trackingEnabled && currentTask == "Detect")
+    trackingOverlay.isHidden = !trackingEnabled || currentTask != "Detect"
+    monitoringStatusLabel.text = "추적 \(trackingEnabled ? "ON" : "OFF") · 자동 채증 \(evidenceEnabled ? "ON" : "OFF") · 전송 \(broadcastEnabled ? "ON" : "OFF")"
+    UserDefaults.standard.set(trackingEnabled, forKey: "aerial.tracking")
+    UserDefaults.standard.set(evidenceEnabled, forKey: "aerial.evidence")
+    if !usesFeatureTracking { clearFeatureTracking() }
+  }
+
+  @objc private func showMonitoringSettings() {
+    let menu = UIAlertController(title: "추적 · 채증 · 가입자 알림",
+      message: "자동 채증은 앱 내 갤러리에만 보관합니다(최대 500MB). 사진 앱에는 선택한 자료만 저장할 수 있습니다. 가입자에게는 사진·위치 없이 드론 식별 알림만 전송합니다.\n\(RemoteDroneAlerts.shared.status)",
+      preferredStyle: .actionSheet)
+    menu.addAction(UIAlertAction(title: trackingEnabled ? "추적 끄기" : "추적 켜기", style: .default) { [weak self] _ in
+      guard let self else { return }; trackingEnabled.toggle(); clearFeatureTracking(); applyMonitoringSettings()
+    })
+    menu.addAction(UIAlertAction(title: evidenceEnabled ? "자동 채증 끄기" : "자동 채증 켜기", style: .default) { [weak self] _ in
+      guard let self else { return }; evidenceEnabled.toggle(); applyMonitoringSettings()
+    })
+    menu.addAction(UIAlertAction(title: "채증 갤러리", style: .default) { [weak self] _ in
+      guard let self else { return }
+      let gallery = UINavigationController(rootViewController: EvidenceGalleryController(store: evidenceStore))
+      gallery.modalPresentationStyle = .fullScreen
+      present(gallery, animated: true)
+    })
+    if RemoteDroneAlerts.shared.connected {
+      let broadcast = UIAlertAction(title: broadcastEnabled ? "가입자에게 전송 끄기" : "가입자에게 전송 켜기", style: .default) { [weak self] _ in
+        guard let self else { return }; broadcastEnabled.toggle(); applyMonitoringSettings()
+      }
+      broadcast.isEnabled = RemoteDroneAlerts.shared.canPublish
+      menu.addAction(broadcast)
+      menu.addAction(UIAlertAction(title: "알림 구독 해제", style: .destructive) { [weak self] _ in
+        Task { @MainActor in
+          do {
+            try await RemoteDroneAlerts.shared.leave()
+            self?.broadcastEnabled = false; self?.applyMonitoringSettings()
+          } catch { self?.showMonitoringMessage(error.localizedDescription) }
+        }
+      })
+    } else {
+      menu.addAction(UIAlertAction(title: "초대코드로 알림 가입", style: .default) { [weak self] _ in self?.joinRemoteAlerts() })
+    }
+    menu.addAction(UIAlertAction(title: "닫기", style: .cancel))
+    menu.popoverPresentationController?.sourceView = monitoringButton
+    menu.popoverPresentationController?.sourceRect = monitoringButton.bounds
+    present(menu, animated: true)
+  }
+
+  private func joinRemoteAlerts() {
+    let form = UIAlertController(title: "가입자 알림 연결",
+      message: "운영자가 제공한 서버 주소와 초대코드를 입력하세요. 연결 시 기기 알림 주소가 서버에 등록됩니다.", preferredStyle: .alert)
+    form.addTextField { $0.placeholder = "https://알림서버주소"; $0.keyboardType = .URL; $0.autocapitalizationType = .none }
+    form.addTextField { $0.placeholder = "초대코드"; $0.isSecureTextEntry = true; $0.autocapitalizationType = .none }
+    form.addAction(UIAlertAction(title: "취소", style: .cancel))
+    form.addAction(UIAlertAction(title: "가입", style: .default) { [weak self, weak form] _ in
+      guard let fields = form?.textFields else { return }
+      let server = fields[0].text ?? "", code = fields[1].text ?? ""
+      Task { @MainActor in
+        do { try await RemoteDroneAlerts.shared.join(serverText: server, invite: code) }
+        catch { self?.showMonitoringMessage(error.localizedDescription) }
+      }
+    })
+    present(form, animated: true)
+  }
+
+  private func showMonitoringMessage(_ text: String) {
+    let alert = UIAlertController(title: "추적 · 채증 · 알림", message: text, preferredStyle: .alert)
+    alert.addAction(UIAlertAction(title: "확인", style: .default))
+    present(alert, animated: true)
+  }
+
+  @objc private func clearFeatureTracking() {
+    resultsExpiry?.cancel(); resultsExpiry = nil
+    tracker.reset(); featureTracks.removeAll(); trackWingEvidence.removeAll()
+    trackingOverlay.tracks = []
+    resetDroneCandidate()
+  }
+
+  private func processAerialFeatures(result: YOLOResult) {
+    applyOverlayVisibility()
+    guard usesFeatureTracking, currentTask == "Detect", UIApplication.shared.applicationState == .active,
+      presentedViewController == nil, viewIfLoaded?.window != nil else {
+      if !featureTracks.isEmpty { clearFeatureTracking() }; return
+    }
+    let context = "\(yoloView.trackingCameraContext):\(result.orig_shape):\(yoloView.bounds.size)"
+    if context != trackingContext { clearFeatureTracking(); trackingContext = context }
+    let now = CACurrentMediaTime()
+    featureTracks = tracker.update(boxes: result.boxes, time: now)
+    let ids = Set(featureTracks.map(\.id))
+    trackWingEvidence = trackWingEvidence.filter { ids.contains($0.key) }
+    for index in featureTracks.indices {
+      let track = featureTracks[index]
+      guard track.observed else { trackWingEvidence[track.id] = nil; continue }
+      var motion = trackWingEvidence[track.id] ?? WingMotionEvidence()
+      let wingMotion = motion.update(image: result.originalImage, box: track.box, time: now)
+      let contradictory = result.boxes.contains {
+        (isBirdClass($0.cls) || isAirplaneClass($0.cls)) && $0.conf >= 0.60
+          && $0.conf >= track.score * 0.75 && overlaps($0.xywhn, track.box)
+      }
+      featureTracks[index].identificationSuppressed = track.label == "drone" && (wingMotion || contradictory)
+      trackWingEvidence[track.id] = motion
+    }
+    trackingOverlay.imageSize = result.orig_shape
+    trackingOverlay.tracks = trackingEnabled ? featureTracks : []
+    resultsExpiry?.cancel()
+    let expiry = DispatchWorkItem { [weak self] in self?.clearFeatureTracking() }
+    resultsExpiry = expiry
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: expiry)
+    if evidenceEnabled {
+      evidenceStore.record(result: result, tracks: featureTracks, model: currentModelName) { [weak self] outcome in
+        switch outcome {
+        case .success: self?.monitoringStatusLabel.text = "채증 완료 · 앱 내 갤러리에 보관"
+        case .failure(let error):
+          self?.evidenceEnabled = false; self?.applyMonitoringSettings()
+          self?.monitoringStatusLabel.text = error.localizedDescription
+        }
+      }
+    }
+    if broadcastEnabled, result.names.contains(where: isBirdClass), result.names.contains(where: isDroneClass) {
+      for track in featureTracks where track.classification == "드론" {
+        RemoteDroneAlerts.shared.publish(trackID: track.id, score: track.score)
+      }
+    }
+  }
+
+  private func applyOverlayVisibility() {
+    let overlays = !(trackingEnabled && currentTask == "Detect")
+    if yoloView.showOverlays != overlays { yoloView.showOverlays = overlays }
+    trackingOverlay.isHidden = !trackingEnabled || currentTask != "Detect"
   }
 
   private func isBirdClass(_ value: String) -> Bool {
@@ -392,8 +555,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
     switch stage {
     case .unknown:
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    case .suspected:
-      UINotificationFeedbackGenerator().notificationOccurred(.warning)
     case .high:
       UINotificationFeedbackGenerator().notificationOccurred(.error)
       AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
@@ -403,17 +564,31 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private func processDroneAlert(result: YOLOResult) {
     guard droneAlertEnabled else { return }
+    guard UIApplication.shared.applicationState == .active, presentedViewController == nil,
+      viewIfLoaded?.window != nil else { resetDroneCandidate(); return }
     guard currentTask == "Detect" else {
       resetDroneCandidate()
       droneAlertStatusLabel.text = "탐지(Detect) 모델을 선택하세요"
       return
     }
 
-    // Refuse to equate any ordinary moving object with a drone. Both labels must be present.
-    guard result.names.contains(where: isBirdClass),
-          result.names.contains(where: isDroneClass) else {
+    // Both classes are required before any drone warning, including tracked warnings.
+    guard result.names.contains(where: isBirdClass), result.names.contains(where: isDroneClass) else {
       resetDroneCandidate()
-      droneAlertStatusLabel.text = "기본 YOLO26에는 드론 클래스 없음 · 추가 학습 필요"
+      droneAlertStatusLabel.text = "새·드론 구분 모델을 선택하세요"
+      return
+    }
+    if usesFeatureTracking {
+      let observed = featureTracks.filter(\.observed)
+      let high = observed.first { $0.classification == "드론" }
+      let unknown = observed.first { $0.classification == "미확인 물체" && $0.samples >= 3 }
+      let stage: DroneAlertStage = high != nil ? .high : (unknown != nil ? .unknown : .none)
+      if stage == .none { droneAlertAudio.stop() } else { soundForStableStage(stage) }
+      previousAlertStage = stage
+      droneAlertStatusLabel.text = high.map { "드론 #\($0.id) \(Int($0.score * 100))점" }
+        ?? unknown.map { "미확인 물체 #\($0.id)" }
+        ?? observed.first.map { "\($0.classification) #\($0.id) · 경보 없음" }
+        ?? "감시 중 · 현재 탐지 없음"
       return
     }
 
@@ -436,7 +611,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     guard let candidate = candidates.max(by: { $0.conf < $1.conf }) else {
       resetDroneCandidate()
       if let other = otherAircraft.max(by: { $0.conf < $1.conf }) {
-        let label = isBirdClass(other.cls) ? "새 후보" : "비행기 후보"
+        let label = isBirdClass(other.cls) ? "새" : "비행기 후보"
         droneAlertStatusLabel.text = String(
           format: "%@ %.0f%% · 경보 없음", label, other.conf * 100)
       } else {
@@ -472,14 +647,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
       && candidate.conf >= 0.70 && hasResolvableShape {
       stage = .high
       droneAlertStatusLabel.text = String(
-        format: "드론 확신(모델 추정) %.0f%%", averageConfidence * 100)
-    } else if isDroneClass(candidate.cls)
-      && droneCandidateFrames >= (hasResolvableShape ? 4 : 8) && averageConfidence >= 0.60
-      && candidate.conf >= 0.60 {
-      stage = .suspected
-      droneAlertStatusLabel.text = String(
-        format: hasResolvableShape ? "드론 의심 %.0f%%" : "드론 의심 · 작은 물체 사전 경보 %.0f%%",
-        averageConfidence * 100)
+        format: "드론 %.0f%%", averageConfidence * 100)
     } else {
       stage = .unknown
       droneAlertStatusLabel.text = String(
@@ -543,7 +711,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
-    resetDroneCandidate()
+    clearFeatureTracking()
   }
 
   override func viewDidLoad() {
@@ -1174,6 +1342,7 @@ extension ViewController {
     DispatchQueue.main.async { [weak self] in
       self?.breakdownText = text
       self?.renderPerformanceLabel()
+      self?.processAerialFeatures(result: result)
       self?.processDroneAlert(result: result)
     }
   }
