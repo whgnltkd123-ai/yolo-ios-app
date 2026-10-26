@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A31000000000000000000000 /* AerialMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32000000000000000000000 /* AerialMonitoring.swift */; };
+		A31000000000000000000001 /* RemoteDroneAlerts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32000000000000000000001 /* RemoteDroneAlerts.swift */; };
+		A31000000000000000000002 /* EvidenceGalleryController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32000000000000000000002 /* EvidenceGalleryController.swift */; };
 		633BC6FB22EDE73D00821BCA /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 633BC6FA22EDE73D00821BCA /* Settings.bundle */; };
 		636EFCAA21E62DD300DE43BC /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636EFC9C21E62DD300DE43BC /* ViewController.swift */; };
 		636EFCAB21E62DD300DE43BC /* ViewController+ExternalDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636EFC9D21E62DD300DE43BC /* ViewController+ExternalDisplay.swift */; };
@@ -28,6 +31,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A32000000000000000000000 /* AerialMonitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AerialMonitoring.swift; sourceTree = "<group>"; };
+		A32000000000000000000001 /* RemoteDroneAlerts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDroneAlerts.swift; sourceTree = "<group>"; };
+		A32000000000000000000002 /* EvidenceGalleryController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceGalleryController.swift; sourceTree = "<group>"; };
 		6323C44D22186177008AE681 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		6323C44F22186177008AE681 /* Main.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = Main.storyboard; sourceTree = "<group>"; };
 		6323C45122186177008AE681 /* ultralytics_yolo_logotype.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = ultralytics_yolo_logotype.png; sourceTree = "<group>"; };
@@ -68,6 +74,9 @@
 				737AB29D2E3E6418003FA92B /* SceneDelegate.swift */,
 				636EFCA721E62DD300DE43BC /* AppDelegate.swift */,
 				636EFC9C21E62DD300DE43BC /* ViewController.swift */,
+				A32000000000000000000000 /* AerialMonitoring.swift */,
+				A32000000000000000000001 /* RemoteDroneAlerts.swift */,
+				A32000000000000000000002 /* EvidenceGalleryController.swift */,
 				73D95D152D45DA510050E640 /* ModelDownloadManager.swift */,
 				73D95D1A2D45DB800050E640 /* RemoteModels.swift */,
 				73D95D1B2D45DB900050E640 /* ModelSelectionManager.swift */,
@@ -241,6 +250,9 @@
 				737AB2A12E3E6418003FA92B /* ExternalDisplayManager.swift in Sources */,
 				737AB2A22E3E6418003FA92B /* ExternalSceneDelegate.swift in Sources */,
 				636EFCAA21E62DD300DE43BC /* ViewController.swift in Sources */,
+				A31000000000000000000000 /* AerialMonitoring.swift in Sources */,
+				A31000000000000000000001 /* RemoteDroneAlerts.swift in Sources */,
+				A31000000000000000000002 /* EvidenceGalleryController.swift in Sources */,
 				636EFCAB21E62DD300DE43BC /* ViewController+ExternalDisplay.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

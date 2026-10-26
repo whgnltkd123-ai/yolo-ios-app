@@ -29,7 +29,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>YOLO Drone Alert uses the camera for on-device object detection and drone-class alerts.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>To save results to Photo Library.</string>
+	<string>선택한 채증 사진을 사진 앱에 저장할 때만 사용합니다.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>To see images in Photo Library and apply AI object detection to them.</string>
 	<key>UIApplicationSceneManifest</key>
