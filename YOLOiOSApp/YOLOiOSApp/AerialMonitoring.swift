@@ -86,7 +86,7 @@ final class AerialEvidenceStore {
     queue.async { [self] in
       let result = Result {
         guard UUID(uuidString: item.id) != nil,
-          item.folder.standardizedFileURL == folder.appendingPathComponent(item.id).standardizedFileURL
+          item.folder.standardizedFileURL == folder.appendingPathComponent(item.id, isDirectory: true).standardizedFileURL
         else { throw CocoaError(.fileWriteInvalidFileName) }
         try FileManager.default.removeItem(at: item.folder)
       }

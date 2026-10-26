@@ -28,7 +28,7 @@ let appTasks: [(name: String, shortName: String, folder: String, yoloTask: YOLOT
   ("OBB", "OBB", "Models/OBB", .obb),
 ]
 
-/// Three distinctive, locally generated alert sounds. No bundled audio assets or network needed.
+/// Locally generated unknown/drone alert sounds. No bundled audio assets or network needed.
 private final class DroneAlertSoundPlayer {
   private var currentPlayer: AVAudioPlayer?
   private var cachedTones: [Int: Data] = [:]
@@ -49,7 +49,7 @@ private final class DroneAlertSoundPlayer {
   }
 
   func play(stage: Int) {
-    guard (1...3).contains(stage) else { return }
+    guard stage == 1 || stage == 3 else { return }
     // A loop must expire if camera results stop arriving.
     stopWhenResultsExpire?.cancel()
     let expiry = DispatchWorkItem { [weak self] in self?.stop() }
@@ -77,7 +77,7 @@ private final class DroneAlertSoundPlayer {
 
   private static func makeTone(stage: Int) -> Data {
     let sampleRate = 22_050
-    let duration = stage == 1 ? 0.48 : (stage == 2 ? 0.82 : 1.6)
+    let duration = stage == 1 ? 0.48 : 1.6
     let count = Int(Double(sampleRate) * duration)
     // Keep a one-second silent gap between repeated alert patterns.
     let silenceCount = sampleRate
@@ -116,9 +116,6 @@ private final class DroneAlertSoundPlayer {
       case 1: // Unknown: two short pulses
         frequency = 630
         gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.55 : 0
-      case 2: // Suspected: three medium warning pulses
-        frequency = 880
-        gate = Int(t / 0.23) < 3 && t.truncatingRemainder(dividingBy: 0.23) < 0.14 ? 0.75 : 0
       default: // High-confidence model indication: alternating siren
         frequency = 950 + 390 * sin(2 * .pi * 2.5 * t)
         gate = 0.80

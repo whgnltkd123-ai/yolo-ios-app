@@ -88,4 +88,3 @@ test("expired invites and memberships cannot enroll or publish", async (t) => {
 test("missing APNs credentials fail startup rather than pretend delivery works", () => {
   assert.throws(() => apnsSender({}), /Configure APNS/);
 });
-

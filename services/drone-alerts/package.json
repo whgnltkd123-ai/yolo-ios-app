@@ -10,4 +10,3 @@
     "test": "node --test server.test.mjs"
   }
 }
-

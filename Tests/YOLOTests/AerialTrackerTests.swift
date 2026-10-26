@@ -54,4 +54,3 @@ final class AerialTrackerTests: XCTestCase {
     XCTAssertEqual(tracks[0].classification, "미확인 물체")
   }
 }
-

@@ -223,4 +223,3 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     process.on("SIGTERM", shutdown); process.on("SIGINT", shutdown);
   }
 }
-

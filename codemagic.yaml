@@ -133,6 +133,16 @@ workflows:
             -derivedDataPath "$CM_BUILD_DIR/build/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             build
+      - name: Verify causal tracker regressions on iOS Simulator
+        script: |
+          set -euo pipefail
+          if [ "$CM_BRANCH" != "feat/tracking-evidence-alerts" ]; then exit 0; fi
+          IOS_SIMULATOR=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if "iOS" in k for x in v if "iPhone" in x["name"] and x["isAvailable"]))')
+          xcodebuild -scheme UltralyticsYOLO -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$IOS_SIMULATOR,arch=arm64" \
+            -derivedDataPath "$CM_BUILD_DIR/build/TrackerTests" \
+            -only-testing:YOLOTests/AerialTrackerTests \
+            IPHONEOS_DEPLOYMENT_TARGET=16.0 test
       - name: Produce unsigned YOLO26 drone alert IPA for Windows Sideloadly
         script: |
           set -euo pipefail

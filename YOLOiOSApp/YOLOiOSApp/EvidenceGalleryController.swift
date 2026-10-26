@@ -241,4 +241,3 @@ private final class EvidenceDetailController: UIViewController {
     present(alert, animated: true)
   }
 }
-
