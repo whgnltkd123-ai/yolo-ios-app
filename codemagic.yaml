@@ -99,6 +99,9 @@ workflows:
         - pattern: fix/colab-resume-validation
           include: true
           source: true
+        - pattern: feat/tracking-evidence-alerts
+          include: true
+          source: true
       cancel_previous_builds: true
     environment:
       xcode: latest

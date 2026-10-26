@@ -70,6 +70,7 @@ final class EvidenceGalleryController: UICollectionViewController, UICollectionV
     cell.itemID = item.id
     cell.picture.image = nil
     cell.caption.text = "\(item.summary)\n\(item.date.formatted(date: .abbreviated, time: .shortened))"
+    cell.accessibilityLabel = cell.caption.text
     imageQueue.async {
       let image = Self.thumbnail(item.image, maxPixel: 480)
       DispatchQueue.main.async { [weak cell] in

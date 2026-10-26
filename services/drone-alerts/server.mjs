@@ -162,6 +162,7 @@ export function alertServer({ db, sendPush, now = Date.now }) {
       if (route !== "POST /v1/events") throw failure(404, "Not found");
       if (member.role !== "publisher") throw failure(403, "Publisher role required");
       const { eventID, score, observedAt } = await readBody(req);
+      authenticate(req); // Revocation may have occurred while the request body was arriving.
       if (typeof eventID !== "string" || !/^[0-9a-f-]{36}$/i.test(eventID) ||
           !Number.isFinite(score) || score < 0.70 || score > 1 ||
           !Number.isFinite(observedAt) || Math.abs(now() / 1000 - observedAt) > 60)
