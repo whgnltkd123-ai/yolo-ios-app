@@ -288,7 +288,8 @@ public class BasePredictor: Predictor, @unchecked Sendable {
 
         // (2) Extract class labels
         predictor.labels = userDefined.map(Self.parseLabels(from:)) ?? []
-        predictor.hasAerialClassScores = userDefined?["aerial_score_schema"] == "xyxy_conf_class_drone_bird_airplane_v1"
+        predictor.hasAerialClassScores =
+          userDefined?["aerial_score_schema"] == "xyxy_conf_class_drone_bird_airplane_v1"
           && predictor.labels == ["drone", "bird", "airplane"]
 
         // Detect NMS-free models (YOLO26 support)

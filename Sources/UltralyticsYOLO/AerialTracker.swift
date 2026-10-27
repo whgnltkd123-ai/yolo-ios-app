@@ -27,8 +27,10 @@ public struct AerialTrack {
   }
 
   public var classification: String {
-    guard hasEvidence(threshold: 0.60, count: label == "drone" ? 7 : 3,
-                      duration: label == "drone" ? 0.30 : 0.10)
+    guard
+      hasEvidence(
+        threshold: 0.60, count: label == "drone" ? 7 : 3,
+        duration: label == "drone" ? 0.30 : 0.10)
     else { return "미확인 물체" }
     return label == "drone" ? "드론" : label == "bird" ? "새" : "비행기"
   }
@@ -36,7 +38,8 @@ public struct AerialTrack {
   /// Suspicion is still an unidentified object and must not trigger confirmed-drone broadcast.
   public var suspicion: String? {
     guard classification == "미확인 물체", label != "airplane",
-      hasEvidence(threshold: 0.40, count: 3, duration: 0.10) else { return nil }
+      hasEvidence(threshold: 0.40, count: 3, duration: 0.10)
+    else { return nil }
     return label == "drone" ? "드론 의심" : "새 의심"
   }
 
@@ -162,7 +165,8 @@ public struct AerialTracker {
         tracks[i].observed = true
         tracks[i].lastSeen = time
         tracks[i].samples += 1
-        tracks[i].recent.append((tracks[i].label, detection.conf, time, Self.margin(for: detection)))
+        tracks[i].recent.append(
+          (tracks[i].label, detection.conf, time, Self.margin(for: detection)))
         tracks[i].recent = Array(tracks[i].recent.filter { time - $0.2 <= 1 }.suffix(64))
         tracks[i].trail.append(CGPoint(x: detection.xywhn.midX, y: detection.xywhn.midY))
         tracks[i].trail = Array(tracks[i].trail.suffix(24))

@@ -33,6 +33,7 @@ SCORE_SCHEMA = "xyxy_conf_class_drone_bird_airplane_v1"
 def retain_aerial_class_scores(model):
     """Keep original one2one TopK selection and attach its same-anchor class vector."""
     from types import MethodType
+
     from ultralytics.nn.modules.head import Detect
 
     head = model.model[-1]
@@ -46,8 +47,7 @@ def aerial_postprocess(head, predictions):
 
     boxes, class_scores = predictions.split((4, 3), dim=-1)
     score, label, anchor = head.get_topk_index(class_scores, head.max_det)
-    return torch.cat((head._gather(boxes, anchor), score, label,
-                      head._gather(class_scores, anchor)), dim=-1)
+    return torch.cat((head._gather(boxes, anchor), score, label, head._gather(class_scores, anchor)), dim=-1)
 
 
 def download_verified_weights() -> Path:

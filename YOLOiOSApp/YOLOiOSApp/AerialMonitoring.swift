@@ -123,7 +123,8 @@ final class AerialEvidenceStore {
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let objects: [[String: Any]] = eligible.map {
       [
-        "trackID": $0.id, "displayClass": $0.classification, "suspicion": $0.suspicion ?? "", "modelClass": $0.label,
+        "trackID": $0.id, "displayClass": $0.classification, "suspicion": $0.suspicion ?? "",
+        "modelClass": $0.label,
         "classScores": $0.classScores ?? [:],
         "score": $0.score,
         "normalizedBox": [$0.box.minX, $0.box.minY, $0.box.width, $0.box.height],

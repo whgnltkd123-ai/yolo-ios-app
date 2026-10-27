@@ -178,11 +178,14 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
       let normalizedBox = normalizedRect(fromInputRect: imageRect)
       let label = labelName(for: classIndex)
 
-      var box = Box(index: classIndex, cls: label, conf: conf, xywh: imageRect, xywhn: normalizedBox)
+      var box = Box(
+        index: classIndex, cls: label, conf: conf, xywh: imageRect, xywhn: normalizedBox)
       if hasAerialClassScores, numFields == 9 {
         let scores = (0..<3).map { pointer[base + (6 + $0) * fieldStride] }
-        if scores.indices.contains(classIndex), scores.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
-          abs(scores[classIndex] - conf) < 0.02 {
+        if scores.indices.contains(classIndex),
+          scores.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
+          abs(scores[classIndex] - conf) < 0.02
+        {
           box.classScores = Dictionary(uniqueKeysWithValues: zip(labels, scores))
         }
       }
