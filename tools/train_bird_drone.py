@@ -8,6 +8,7 @@ Usage (on a GPU-enabled Linux/macOS computer or Colab):
 The dataset must have separate BIRD and DRONE classes. Don't treat every
 unlabeled distant dot as a positive drone. Use held-out real field videos.
 """
+
 import argparse
 import shutil
 from pathlib import Path
@@ -40,7 +41,7 @@ def main():
     p.add_argument("--device", default="0", help="0=first GPU; cpu for a slow smoke test")
     p.add_argument("--skip-coreml", action="store_true", help="Train .pt only")
     args = p.parse_args()
-    metadata = validate_two_classes(args.data)
+    validate_two_classes(args.data)
     model = YOLO("yolov8n.pt")
     model.train(
         data=str(args.data.resolve()),

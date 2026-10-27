@@ -37,6 +37,7 @@
 BLE 수신기와 iPhone Core Bluetooth 연동은 가능하다. 일반 블루투스 페어링만으로 모든 진동 기기를 제어할 수는 없다. 제품이나 직접 제작한 펌웨어의 쓰기 가능한 GATT 명령 규격이 필요하다. 아직 제품이 없으므로 현재 앱에는 검증되지 않은 BLE 제어를 넣지 않았다.
 
 전용 수신기 계약 초안:
+
 - 보안 연결·bonding 후 사용자가 선택한 기기 한 대만 연결한다.
 - 고유 service UUID와 command(write-with-response), status(notify) characteristic을 정의한다.
 - 명령에 버전, 이벤트 순번, 패턴, 지속 시간(최대 2초)을 넣는다. 중복 순번은 재진동하지 않는다.

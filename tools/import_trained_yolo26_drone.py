@@ -11,6 +11,7 @@ would NOT add drone recognition. Third-party PyTorch files can execute arbitrary
 code during deserialization: use only your own trusted checkpoint on an isolated
 Codemagic build host without credentials/secrets.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -113,28 +114,41 @@ def verify_coreml_export(weights: Path, export_path: Path, imgsz: int) -> dict:
             raise RuntimeError("Non-finite Core ML output")
         # End-to-end TopK can reorder near-tied rows; compare scores by rank and
         # match confident boxes in both directions instead of assuming row IDs.
-        np.testing.assert_allclose(np.sort(expected[:, 4]), np.sort(actual[:, 4]), atol=.01, rtol=.05)
+        np.testing.assert_allclose(np.sort(expected[:, 4]), np.sort(actual[:, 4]), atol=0.01, rtol=0.05)
         max_box_delta = 0.0
         max_score_delta = 0.0
         for left, right in ((expected, actual), (actual, expected)):
             used = set()
-            for row in left[left[:, 4] >= .30]:
-                candidates = [(float(np.max(np.abs(row[:4] - r[:4]))), i)
-                              for i, r in enumerate(right)
-                              if i not in used and round(float(row[5])) == round(float(r[5]))]
+            for row in left[left[:, 4] >= 0.30]:
+                candidates = [
+                    (float(np.max(np.abs(row[:4] - r[:4]))), i)
+                    for i, r in enumerate(right)
+                    if i not in used and round(float(row[5])) == round(float(r[5]))
+                ]
                 delta, index = min(candidates, default=(float("inf"), -1))
-                if index < 0 or delta > 4.0 or abs(float(row[4] - right[index, 4])) > .02:
+                if index < 0 or delta > 4.0 or abs(float(row[4] - right[index, 4])) > 0.02:
                     raise RuntimeError(f"Core ML conversion mismatch: {fixture.name}")
                 used.add(index)
                 max_box_delta = max(max_box_delta, delta)
                 max_score_delta = max(max_score_delta, abs(float(row[4] - right[index, 4])))
-        checks.append({"image": fixture.name, "image_sha256": hashlib.sha256(fixture.read_bytes()).hexdigest(),
-                       "pytorch_above_030": int((expected[:, 4] >= .30).sum()),
-                       "coreml_above_030": int((actual[:, 4] >= .30).sum()),
-                       "max_box_delta_pixels": max_box_delta, "max_score_delta": max_score_delta})
-    report = {"checkpoint_sha256": source_sha, "classes": ["drone", "bird", "airplane"],
-              "input_size": imgsz, "conversion_smoke_passed": True, "checks": checks,
-              "limitations": "Three public frames only; not an accuracy gate or iPhone camera/device validation."}
+        checks.append(
+            {
+                "image": fixture.name,
+                "image_sha256": hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                "pytorch_above_030": int((expected[:, 4] >= 0.30).sum()),
+                "coreml_above_030": int((actual[:, 4] >= 0.30).sum()),
+                "max_box_delta_pixels": max_box_delta,
+                "max_score_delta": max_score_delta,
+            }
+        )
+    report = {
+        "checkpoint_sha256": source_sha,
+        "classes": ["drone", "bird", "airplane"],
+        "input_size": imgsz,
+        "conversion_smoke_passed": True,
+        "checks": checks,
+        "limitations": "Three public frames only; not an accuracy gate or iPhone camera/device validation.",
+    }
     Path("build").mkdir(exist_ok=True)
     Path("build/coreml-conversion-check.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     converted.save(str(DEST))
@@ -155,9 +169,7 @@ def main():
     args = ckpt.get("train_args", {}) if isinstance(ckpt, dict) else {}
     starting_model = str(args.get("model", ""))
     if starting_model and not (
-        "yolo26" in starting_model.lower()
-        or starting_model.endswith("yolo26-drone.pt")
-        or starting_model.endswith("nano-bird-drone.pt")
+        "yolo26" in starting_model.lower() or starting_model.endswith(("yolo26-drone.pt", "nano-bird-drone.pt"))
     ):
         print("WARNING: checkpoint training arguments do not prove a YOLO26n lineage:", starting_model)
     imgsz = int(os.environ.get("YOLO26_DRONE_IMGSZ", "640"))

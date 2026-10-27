@@ -55,23 +55,33 @@ public struct AerialTracker {
     let value = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     if ["bird", "birds"].contains(value) { return "bird" }
     if ["airplane", "aeroplane", "plane"].contains(value) { return "airplane" }
-    if ["drone", "drones", "uav", "uas", "quadcopter", "hexacopter", "multicopter",
-      "fpv drone", "fpv-drone", "fixed wing", "fixed-wing", "unmanned aerial vehicle"].contains(value)
-      || value.hasPrefix("drone ") || value.hasSuffix(" drone") { return "drone" }
+    if [
+      "drone", "drones", "uav", "uas", "quadcopter", "hexacopter", "multicopter",
+      "fpv drone", "fpv-drone", "fixed wing", "fixed-wing", "unmanned aerial vehicle",
+    ].contains(value)
+      || value.hasPrefix("drone ") || value.hasSuffix(" drone")
+    {
+      return "drone"
+    }
     return nil
   }
 
   public mutating func update(boxes: [Box], time: Double) -> [AerialTrack] {
-    guard time.isFinite else { reset(); return [] }
+    guard time.isFinite else {
+      reset()
+      return []
+    }
     if let lastTime, time <= lastTime || time - lastTime > 0.5 { reset() }
     lastTime = time
     tracks.removeAll { time - $0.lastSeen > 0.5 }
-    let detections = Array(boxes.filter {
-      Self.category($0.cls) != nil && $0.conf.isFinite && (0.30...1).contains($0.conf)
-        && $0.xywhn.width > 0 && $0.xywhn.height > 0
-        && [$0.xywhn.minX, $0.xywhn.minY, $0.xywhn.width, $0.xywhn.height].allSatisfy(\.isFinite)
-    }.prefix(50))
-    var costs = [[Double]](repeating: [Double](repeating: .infinity, count: detections.count), count: tracks.count)
+    let detections = Array(
+      boxes.filter {
+        Self.category($0.cls) != nil && $0.conf.isFinite && (0.30...1).contains($0.conf)
+          && $0.xywhn.width > 0 && $0.xywhn.height > 0
+          && [$0.xywhn.minX, $0.xywhn.minY, $0.xywhn.width, $0.xywhn.height].allSatisfy(\.isFinite)
+      }.prefix(50))
+    var costs = [[Double]](
+      repeating: [Double](repeating: .infinity, count: detections.count), count: tracks.count)
     for i in tracks.indices {
       let track = tracks[i]
       let dt = min(0.5, time - track.lastSeen)
@@ -93,46 +103,60 @@ public struct AerialTracker {
     // ByteTrack-style staging: reliable observations first, then weaker observations for continuity.
     // This is native geometric association, not the Python ByteTrack implementation or ReID.
     for strong in [true, false] {
-    for i in tracks.indices where !matchedTracks.contains(i) && !ambiguousTracks.contains(i) {
-      let candidates = detections.indices.filter {
-        !matchedDetections.contains($0) && (detections[$0].conf >= 0.60) == strong && costs[i][$0].isFinite
-      }.sorted { costs[i][$0] < costs[i][$1] }
-      guard !candidates.isEmpty else { continue }
-      guard let j = candidates.first,
-        candidates.count < 2 || costs[i][candidates[1]] - costs[i][j] > 0.2
-      else { ambiguousTracks.insert(i); continue }
-      let rivals = tracks.indices.filter { $0 != i && !matchedTracks.contains($0) && costs[$0][j].isFinite }
-      guard rivals.allSatisfy({ costs[$0][j] - costs[i][j] > 0.2 }) else {
-        ambiguousTracks.insert(i); continue
+      for i in tracks.indices where !matchedTracks.contains(i) && !ambiguousTracks.contains(i) {
+        let candidates = detections.indices.filter {
+          !matchedDetections.contains($0) && (detections[$0].conf >= 0.60) == strong
+            && costs[i][$0].isFinite
+        }.sorted { costs[i][$0] < costs[i][$1] }
+        guard !candidates.isEmpty else { continue }
+        guard let j = candidates.first,
+          candidates.count < 2 || costs[i][candidates[1]] - costs[i][j] > 0.2
+        else {
+          ambiguousTracks.insert(i)
+          continue
+        }
+        let rivals = tracks.indices.filter {
+          $0 != i && !matchedTracks.contains($0) && costs[$0][j].isFinite
+        }
+        guard rivals.allSatisfy({ costs[$0][j] - costs[i][j] > 0.2 }) else {
+          ambiguousTracks.insert(i)
+          continue
+        }
+        let detection = detections[j]
+        let dt = max(time - tracks[i].lastSeen, 0.001)
+        let measured = CGVector(
+          dx: (detection.xywhn.midX - tracks[i].box.midX) / dt,
+          dy: (detection.xywhn.midY - tracks[i].box.midY) / dt)
+        tracks[i].velocity = CGVector(
+          dx: measured.dx * 0.6 + tracks[i].velocity.dx * 0.4,
+          dy: measured.dy * 0.6 + tracks[i].velocity.dy * 0.4)
+        tracks[i].box = detection.xywhn
+        tracks[i].label = Self.category(detection.cls)!
+        tracks[i].score = detection.conf
+        tracks[i].observed = true
+        tracks[i].lastSeen = time
+        tracks[i].samples += 1
+        tracks[i].recent.append((tracks[i].label, detection.conf, time))
+        tracks[i].recent = Array(tracks[i].recent.filter { time - $0.2 <= 1 }.suffix(64))
+        tracks[i].trail.append(CGPoint(x: detection.xywhn.midX, y: detection.xywhn.midY))
+        tracks[i].trail = Array(tracks[i].trail.suffix(24))
+        matchedDetections.insert(j)
+        matchedTracks.insert(i)
       }
-      let detection = detections[j]
-      let dt = max(time - tracks[i].lastSeen, 0.001)
-      let measured = CGVector(dx: (detection.xywhn.midX - tracks[i].box.midX) / dt,
-                              dy: (detection.xywhn.midY - tracks[i].box.midY) / dt)
-      tracks[i].velocity = CGVector(dx: measured.dx * 0.6 + tracks[i].velocity.dx * 0.4,
-                                    dy: measured.dy * 0.6 + tracks[i].velocity.dy * 0.4)
-      tracks[i].box = detection.xywhn
-      tracks[i].label = Self.category(detection.cls)!
-      tracks[i].score = detection.conf
-      tracks[i].observed = true
-      tracks[i].lastSeen = time
-      tracks[i].samples += 1
-      tracks[i].recent.append((tracks[i].label, detection.conf, time))
-      tracks[i].recent = Array(tracks[i].recent.filter { time - $0.2 <= 1 }.suffix(64))
-      tracks[i].trail.append(CGPoint(x: detection.xywhn.midX, y: detection.xywhn.midY))
-      tracks[i].trail = Array(tracks[i].trail.suffix(24))
-      matchedDetections.insert(j)
-      matchedTracks.insert(i)
-    }
     }
     for i in tracks.indices where !matchedTracks.contains(i) {
-      tracks[i].observed = false; tracks[i].recent.removeAll(); tracks[i].samples = 0
+      tracks[i].observed = false
+      tracks[i].recent.removeAll()
+      tracks[i].samples = 0
     }
     for j in detections.indices where !matchedDetections.contains(j) {
       let box = detections[j]
-      tracks.append(AerialTrack(id: nextID, box: box.xywhn, label: Self.category(box.cls)!,
-        score: box.conf, observed: true, trail: [CGPoint(x: box.xywhn.midX, y: box.xywhn.midY)],
-        samples: 1, lastSeen: time, velocity: .zero, recent: [(Self.category(box.cls)!, box.conf, time)]))
+      tracks.append(
+        AerialTrack(
+          id: nextID, box: box.xywhn, label: Self.category(box.cls)!,
+          score: box.conf, observed: true, trail: [CGPoint(x: box.xywhn.midX, y: box.xywhn.midY)],
+          samples: 1, lastSeen: time, velocity: .zero,
+          recent: [(Self.category(box.cls)!, box.conf, time)]))
       nextID += 1
     }
     // Prefer live observations; bound history when many overlapping detections are ambiguous.

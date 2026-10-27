@@ -13,11 +13,11 @@ Example:
    --drone-yaml /content/datasets/bird_drone/data.yaml \
    --output /content/yolo26_81
 """
+
 from __future__ import annotations
 
 import argparse
 import collections
-import os
 import shutil
 from pathlib import Path
 
@@ -45,6 +45,7 @@ def indexed_names(values):
 
 def load_coco_names():
     import ultralytics
+
     cfg = Path(ultralytics.__file__).resolve().parent / "cfg" / "datasets" / "coco.yaml"
     names = indexed_names(yaml.safe_load(cfg.read_text(encoding="utf-8"))["names"])
     if len(names) != 80 or names[14].lower() != "bird" or names[4].lower() != "airplane":
@@ -124,8 +125,12 @@ def main():
     parser.add_argument("--drone-root", type=Path, required=True, help="Roboflow train/images + valid/images")
     parser.add_argument("--drone-yaml", type=Path, required=True, help="Source drone dataset data.yaml")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--drone-valid-split", default="valid", choices=("valid", "val", "test"),
-                        help="Seraphim uses test; typical Roboflow datasets use valid")
+    parser.add_argument(
+        "--drone-valid-split",
+        default="valid",
+        choices=("valid", "val", "test"),
+        help="Seraphim uses test; typical Roboflow datasets use valid",
+    )
     parser.add_argument("--copy-images", action="store_true", help="Copy instead of symlink for portable output")
     args = parser.parse_args()
 
@@ -157,13 +162,22 @@ def main():
         coco_total = assemble_split(
             args.coco_root / "images" / coco_split,
             args.coco_root / "labels" / coco_split,
-            images, labels, "coco", {i: i for i in range(80)},
-            args.copy_images, count,
+            images,
+            labels,
+            "coco",
+            {i: i for i in range(80)},
+            args.copy_images,
+            count,
         )
         drone_total = assemble_split(
             args.drone_root / drone_split / "images",
             args.drone_root / drone_split / "labels",
-            images, labels, "drone", drone_mapping, args.copy_images, count,
+            images,
+            labels,
+            "drone",
+            drone_mapping,
+            args.copy_images,
+            count,
         )
         missing = [coco_names[i] for i in range(80) if count[i] == 0]
         if missing or count[80] == 0:
@@ -172,15 +186,17 @@ def main():
                 "Use COCO train2017/val2017 (not COCO8) and a labeled drone split."
             )
         summary[split] = {
-            "coco_images": coco_total, "drone_images": drone_total,
-            "drone_boxes": count[80], "polygons_converted": count["polygons_converted"],
+            "coco_images": coco_total,
+            "drone_images": drone_total,
+            "drone_boxes": count[80],
+            "polygons_converted": count["polygons_converted"],
         }
     merged = {
         "path": str(output),
         "train": "images/train",
         "val": "images/val",
         "nc": 81,
-        "names": coco_names + ["drone"],
+        "names": [*coco_names, "drone"],
     }
     (output / "data.yaml").write_text(yaml.safe_dump(merged, sort_keys=False, allow_unicode=True), encoding="utf-8")
     print("COCO-80 + drone index 80 merged:", output / "data.yaml")

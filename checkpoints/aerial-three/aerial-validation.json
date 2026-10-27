@@ -3,11 +3,7 @@
   "parent_sha256": "024b3ba7a552a9b52a88cb6de05cf6c2927b8db242ae2d792c215d602e450371",
   "training_run": 362665966,
   "epochs": 50,
-  "classes": [
-    "drone",
-    "bird",
-    "airplane"
-  ],
+  "classes": ["drone", "bird", "airplane"],
   "input_size": 640,
   "fixed_thresholds": {
     "drone": 0.7,

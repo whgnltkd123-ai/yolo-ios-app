@@ -48,6 +48,7 @@ python tools/prepare_yolo26_81_data.py \
 [pathikg/drone-detection-dataset](https://huggingface.co/datasets/pathikg/drone-detection-dataset)에도 이미지와 바운딩박스가 있으며 카드 표시는 MIT 라이선스입니다. 다만 이 자료는 Parquet 객체 구조이므로 위 ZIP 추출 스크립트를 그대로 적용할 수 없습니다. 데이터 필드와 사용권을 별도 검증해 변환해야 합니다.
 
 ---
+
 ## 데이터셋 생성
 
 1. 본인이 이용·학습할 권한이 있는 COCO 2017 공식 YOLO 형식 이미지/라벨을 `images/train2017`, `labels/train2017`, `images/val2017`, `labels/val2017`로 준비합니다.

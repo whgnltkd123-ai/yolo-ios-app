@@ -1,5 +1,6 @@
 import CoreGraphics
 import XCTest
+
 @testable import UltralyticsYOLO
 
 final class AerialTrackerTests: XCTestCase {
@@ -31,7 +32,8 @@ final class AerialTrackerTests: XCTestCase {
     var tracker = AerialTracker()
     var tracks: [AerialTrack] = []
     for i in 0..<7 {
-      tracks = tracker.update(boxes: [box("drone", 0.8, 0.38), box("drone", 0.8, 0.44)],
+      tracks = tracker.update(
+        boxes: [box("drone", 0.8, 0.38), box("drone", 0.8, 0.44)],
         time: Double(i) * 0.05)
     }
     let ids = Set(tracks.map(\.id))

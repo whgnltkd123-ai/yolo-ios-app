@@ -4,15 +4,16 @@ Requires numpy, scipy, mcos-decoder==0.1.0, opencv-python-headless and PyYAML.
 All public clips go into training; existing validation is retained separately.
 This does not establish independence from Seraphim or learn temporal motion.
 """
+
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import urllib.request
+from pathlib import Path
 
 import numpy as np
-from scipy.io import loadmat
 from mcos_decoder.stream import MatStream
+from scipy.io import loadmat
 
 
 def load_video_table(path):
@@ -29,8 +30,7 @@ def load_video_table(path):
                 if lengths is not None and len(lengths) == 1 and lengths[0] > 0:
                     size = int(lengths[0])
                     packed = children[4].payload
-                    names = [packed[i:i+size].split(b"\0")[0].decode("ascii")
-                             for i in range(0, len(packed), size)]
+                    names = [packed[i : i + size].split(b"\0")[0].decode("ascii") for i in range(0, len(packed), size)]
                     if names == ["Time", "AIRPLANE", "BIRD", "DRONE", "HELICOPTER"]:
                         dims = children[1].as_array()
                         rows = int(np.prod(dims))
@@ -46,8 +46,10 @@ def load_video_table(path):
                                 if cell.children[0].as_array()[0] & 255 == 2:
                                     field_width = int(cell.children[3].as_array()[0])
                                     field_bytes = cell.children[4].payload
-                                    fields = [field_bytes[k:k+field_width].split(b"\0")[0]
-                                              for k in range(0, len(field_bytes), field_width)]
+                                    fields = [
+                                        field_bytes[k : k + field_width].split(b"\0")[0]
+                                        for k in range(0, len(field_bytes), field_width)
+                                    ]
                                     if fields != [b"Position", b"LabelUIDs"] or len(cell.children) != 7:
                                         raise ValueError("Unexpected annotated region struct")
                                     cell = cell.children[5]
@@ -65,6 +67,7 @@ def load_video_table(path):
                         candidates.append(result)
         for child in children:
             visit(child)
+
     for element in MatStream(raw).walk():
         visit(element)
     if len(candidates) != 1:
@@ -91,7 +94,8 @@ def download_source(root):
     if tree.get("truncated"):
         raise ValueError("Incomplete source tree")
     files = [
-        item for item in tree["tree"]
+        item
+        for item in tree["tree"]
         if item["path"].startswith("Data/Video_V/V_")
         and Path(item["path"]).name.startswith(("V_DRONE_", "V_BIRD_", "V_AIRPLANE_"))
         and item["path"].endswith((".mp4", "_LABELS.mat"))
@@ -113,10 +117,12 @@ def download_source(root):
             raise ValueError(f"Source hash mismatch: {target}")
         if i % 40 == 0:
             print(f"Verified {i + 1}/{len(files)} source files", flush=True)
-    (root / "source.json").write_text(json.dumps(
-        {"repo": REPOSITORY, "revision": REVISION, "license": "CC0-1.0", "files": files},
-        indent=2,
-    ))
+    (root / "source.json").write_text(
+        json.dumps(
+            {"repo": REPOSITORY, "revision": REVISION, "license": "CC0-1.0", "files": files},
+            indent=2,
+        )
+    )
 
 
 def main():
@@ -177,8 +183,10 @@ def main():
                         x2, y2 = min(w, x + bw), min(h, y + bh)
                         if x2 <= x1 or y2 <= y1:
                             raise ValueError(f"Empty clipped box: {video}")
-                        rows.append(f"{class_id} {(x1+x2)/2/w:.8f} {(y1+y2)/2/h:.8f} "
-                                    f"{(x2-x1)/w:.8f} {(y2-y1)/h:.8f}")
+                        rows.append(
+                            f"{class_id} {(x1 + x2) / 2 / w:.8f} {(y1 + y2) / 2 / h:.8f} "
+                            f"{(x2 - x1) / w:.8f} {(y2 - y1) / h:.8f}"
+                        )
                 # Never turn annotated helicopters into unlabelled background.
                 if count % stride == 0 and not record["helicopter"]:
                     stem = f"{video.stem}_{count:06d}"
@@ -200,17 +208,30 @@ def main():
     manifest = args.output / "train.txt"
     # Keep replay symlink paths: their sibling labels contain the three-class remap.
     manifest.write_text("\n".join(str(p.absolute()) for p in training) + "\n")
-    (args.output / "data.yaml").write_text(yaml.safe_dump({
-        "path": str(args.output.resolve()), "train": str(manifest.resolve()),
-        "val": str(val_dir.resolve()), "names": dict(enumerate(names)),
-    }))
-    (args.output / "preparation.json").write_text(json.dumps({
-        "revision": REVISION, "videos": stats, "replay_images": len(replay),
-        "training_images": len(training),
-        "limitations": "All public clips are training-only. Existing validation is retained, "
-        "but source overlap with Seraphim is unverified. Not an independent field test. "
-        "Frames train appearance, not wing-beat dynamics.",
-    }, indent=2))
+    (args.output / "data.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "path": str(args.output.resolve()),
+                "train": str(manifest.resolve()),
+                "val": str(val_dir.resolve()),
+                "names": dict(enumerate(names)),
+            }
+        )
+    )
+    (args.output / "preparation.json").write_text(
+        json.dumps(
+            {
+                "revision": REVISION,
+                "videos": stats,
+                "replay_images": len(replay),
+                "training_images": len(training),
+                "limitations": "All public clips are training-only. Existing validation is retained, "
+                "but source overlap with Seraphim is unverified. Not an independent field test. "
+                "Frames train appearance, not wing-beat dynamics.",
+            },
+            indent=2,
+        )
+    )
     print(f"Prepared {len(training)} training images; {len(stats)} public clips", flush=True)
 
 
