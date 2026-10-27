@@ -14,6 +14,7 @@ Codemagic build host without credentials/secrets.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import ssl
@@ -75,6 +76,71 @@ def download_verified_weights() -> Path:
     return dest
 
 
+def verify_coreml_export(weights: Path, export_path: Path, imgsz: int) -> dict:
+    """Check conversion on fixed public inputs, independently of accuracy acceptance."""
+    import coremltools as ct
+    import cv2
+    import numpy as np
+    import torch
+    from PIL import Image
+    from ultralytics.data.augment import LetterBox
+
+    torch.set_num_threads(4)
+    reference = YOLO(str(weights)).model.cpu().float().eval()
+    reference.end2end = True  # Match the exporter's explicit nms=False branch.
+    converted = ct.models.MLModel(str(export_path), compute_units=ct.ComputeUnit.CPU_ONLY)
+    source_sha = hashlib.sha256(weights.read_bytes()).hexdigest()
+    converted.user_defined_metadata["checkpoint_sha256"] = source_sha
+    spec = converted.get_spec()
+    if len(spec.description.output) != 1:
+        raise RuntimeError("Expected one end-to-end detection tensor")
+    output_name = spec.description.output[0].name
+    fixtures = sorted(Path("tools/coreml-check-inputs").glob("*.jpg"))
+    if len(fixtures) != 3:
+        raise RuntimeError("Missing fixed public conversion inputs")
+    checks = []
+    for fixture in fixtures:
+        bgr = cv2.imread(str(fixture))
+        rgb = LetterBox((imgsz, imgsz), auto=False)(image=bgr)[..., ::-1].copy()
+        tensor = torch.from_numpy(rgb.transpose(2, 0, 1).copy()).float()[None] / 255
+        with torch.no_grad():
+            raw = reference(tensor)
+        expected = (raw[0] if isinstance(raw, tuple) else raw).detach().numpy()[0]
+        actual = np.asarray(converted.predict({"image": Image.fromarray(rgb)})[output_name])[0]
+        if expected.shape != actual.shape or expected.shape != (300, 6):
+            raise RuntimeError(f"Unexpected detection shape: {expected.shape}, {actual.shape}")
+        if not np.isfinite(actual).all():
+            raise RuntimeError("Non-finite Core ML output")
+        # End-to-end TopK can reorder near-tied rows; compare scores by rank and
+        # match confident boxes in both directions instead of assuming row IDs.
+        np.testing.assert_allclose(np.sort(expected[:, 4]), np.sort(actual[:, 4]), atol=.01, rtol=.05)
+        max_box_delta = 0.0
+        max_score_delta = 0.0
+        for left, right in ((expected, actual), (actual, expected)):
+            used = set()
+            for row in left[left[:, 4] >= .30]:
+                candidates = [(float(np.max(np.abs(row[:4] - r[:4]))), i)
+                              for i, r in enumerate(right)
+                              if i not in used and round(float(row[5])) == round(float(r[5]))]
+                delta, index = min(candidates, default=(float("inf"), -1))
+                if index < 0 or delta > 4.0 or abs(float(row[4] - right[index, 4])) > .02:
+                    raise RuntimeError(f"Core ML conversion mismatch: {fixture.name}")
+                used.add(index)
+                max_box_delta = max(max_box_delta, delta)
+                max_score_delta = max(max_score_delta, abs(float(row[4] - right[index, 4])))
+        checks.append({"image": fixture.name, "image_sha256": hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                       "pytorch_above_030": int((expected[:, 4] >= .30).sum()),
+                       "coreml_above_030": int((actual[:, 4] >= .30).sum()),
+                       "max_box_delta_pixels": max_box_delta, "max_score_delta": max_score_delta})
+    report = {"checkpoint_sha256": source_sha, "classes": ["drone", "bird", "airplane"],
+              "input_size": imgsz, "conversion_smoke_passed": True, "checks": checks,
+              "limitations": "Three public frames only; not an accuracy gate or iPhone camera/device validation."}
+    Path("build").mkdir(exist_ok=True)
+    Path("build/coreml-conversion-check.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    converted.save(str(DEST))
+    return report
+
+
 def main():
     weights = download_verified_weights()
     # IMPORTANT: loading .pt files runs pickle-related parsing; ONLY YOUR OWN weights.
@@ -106,7 +172,7 @@ def main():
     DEST.parent.mkdir(parents=True, exist_ok=True)
     if DEST.exists():
         shutil.rmtree(DEST)
-    shutil.copytree(export_path, DEST)
+    verify_coreml_export(weights, export_path, imgsz)
     print("Bundled fine-tuned YOLO26 model:", DEST)
     print("Original YOLO26 iOS SDK/camera unchanged; real-world FPS and accuracy untested.")
 
