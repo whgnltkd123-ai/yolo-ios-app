@@ -102,12 +102,15 @@ workflows:
         - pattern: feat/tracking-evidence-alerts
           include: true
           source: true
+        - pattern: feat/reinforced-aerial-model
+          include: true
+          source: true
       cancel_previous_builds: true
     environment:
       xcode: latest
       vars:
         YOLO26_DRONE_CHECKPOINT_PATH: checkpoints/aerial-three/best.pt
-        YOLO26_DRONE_CHECKPOINT_SHA256: "024b3ba7a552a9b52a88cb6de05cf6c2927b8db242ae2d792c215d602e450371"
+        YOLO26_DRONE_CHECKPOINT_SHA256: "96c48c83c0ac6210187d4cfadf05dfb0ef337de91e8a368cbde81f82bbb07b03"
     scripts:
       - name: Verify trained YOLO26 checkpoint and convert to Core ML
         script: |
@@ -136,7 +139,7 @@ workflows:
       - name: Verify causal tracker regressions on iOS Simulator
         script: |
           set -euo pipefail
-          if [ "$CM_BRANCH" != "feat/tracking-evidence-alerts" ]; then exit 0; fi
+          case "$CM_BRANCH" in feat/tracking-evidence-alerts|feat/reinforced-aerial-model) ;; *) exit 0 ;; esac
           IOS_SIMULATOR=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if "iOS" in k for x in v if "iPhone" in x["name"] and x["isAvailable"]))')
           xcodebuild -scheme UltralyticsYOLO -sdk iphonesimulator \
             -destination "platform=iOS Simulator,id=$IOS_SIMULATOR,arch=arm64" \
@@ -154,6 +157,7 @@ workflows:
           /usr/bin/zip -qry "$CM_BUILD_DIR/build/YOLO26-Drone-Alert-unsigned.ipa" Payload
     artifacts:
       - build/YOLO26-Drone-Alert-unsigned.ipa
+      - build/coreml-conversion-check.json
       - build/DerivedData/Build/Products/Release-iphoneos/*.app
       - /tmp/xcodebuild_logs/*.log
 

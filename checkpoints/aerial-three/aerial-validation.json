@@ -1,21 +1,78 @@
 {
+  "sha256": "96c48c83c0ac6210187d4cfadf05dfb0ef337de91e8a368cbde81f82bbb07b03",
+  "parent_sha256": "024b3ba7a552a9b52a88cb6de05cf6c2927b8db242ae2d792c215d602e450371",
+  "training_run": 362665966,
+  "epochs": 50,
   "classes": [
     "drone",
     "bird",
     "airplane"
   ],
-  "sha256": "024b3ba7a552a9b52a88cb6de05cf6c2927b8db242ae2d792c215d602e450371",
-  "metrics": {
-    "metrics/precision(B)": 0.8741247472810852,
-    "metrics/recall(B)": 0.6880265458686398,
-    "metrics/mAP50(B)": 0.757838116590755,
-    "metrics/mAP50-95(B)": 0.5481223370727957,
-    "fitness": 0.5481223370727957
+  "input_size": 640,
+  "fixed_thresholds": {
+    "drone": 0.7,
+    "bird": 0.6,
+    "airplane": 0.6
   },
-  "per_class_ap50_95": [
-    0.6902341512157104,
-    0.27667209493877437,
-    0.6774607650639024
-  ],
-  "caveat": "Seraphim test used as validation. COCO background annotations do not establish drone absence by manual audit. No independent field testing performed."
+  "public270": {
+    "drone": {
+      "tp": 9,
+      "fp": 28,
+      "gt": 98,
+      "precision": 0.24324324324324326,
+      "recall": 0.09183673469387756
+    },
+    "bird": {
+      "tp": 0,
+      "fp": 0,
+      "gt": 102,
+      "precision": 0,
+      "recall": 0
+    },
+    "airplane": {
+      "tp": 13,
+      "fp": 10,
+      "gt": 90,
+      "precision": 0.5652173913043478,
+      "recall": 0.14444444444444443
+    }
+  },
+  "cached_baseline": {
+    "drone": {
+      "tp": 9,
+      "fp": 25,
+      "gt": 98,
+      "precision": 0.2647058823529412,
+      "recall": 0.09183673469387756
+    },
+    "bird": {
+      "tp": 0,
+      "fp": 0,
+      "gt": 102,
+      "precision": 0,
+      "recall": 0
+    },
+    "airplane": {
+      "tp": 17,
+      "fp": 9,
+      "gt": 90,
+      "precision": 0.6538461538461539,
+      "recall": 0.18888888888888888
+    }
+  },
+  "background71_fixed_threshold": {
+    "drone": 0,
+    "bird": 0,
+    "airplane": 0
+  },
+  "private292_summary": {
+    "high_drone": 0,
+    "high_bird": 0,
+    "frames_without_detection": 275
+  },
+  "accuracy_gate_passed": false,
+  "user_application_override": "2026-10-27: user requested applying this reinforced model after being told the failed fixed-threshold evaluation.",
+  "conversion_and_device_verification": "Pending build; no installation claim.",
+  "limitations": "Legacy public scene overlap/loose boxes; controlled background crops; no independent field, distance or temporal wingbeat claim.",
+  "conversion_mode": "Explicit nms=False end-to-end; reference uses same one-to-one head. Prior fixed diagnostic used the default PyTorch predictor; report preserved unchanged."
 }
