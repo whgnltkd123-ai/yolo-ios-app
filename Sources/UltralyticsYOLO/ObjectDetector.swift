@@ -155,6 +155,7 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
   ) -> [Box] {
     let numDetections = shape[1]
     let numFields = shape[2]
+    guard numFields >= 6 else { return [] }
     let detStride = strides[1]
     let fieldStride = strides[2]
     var boxes = [Box]()
@@ -168,15 +169,24 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
       let y1 = CGFloat(pointer[base + fieldStride])
       let x2 = CGFloat(pointer[base + 2 * fieldStride])
       let y2 = CGFloat(pointer[base + 3 * fieldStride])
-      let classIndex = numFields > 5 ? Int(pointer[base + 5 * fieldStride]) : 0
+      let rawClass = pointer[base + 5 * fieldStride]
+      guard rawClass.isFinite, rawClass >= 0, rawClass <= 10000 else { continue }
+      let classIndex = Int(rawClass)
 
       let imageRect = inputRect(
         fromModelRect: CGRect(x: x1, y: y1, width: x2 - x1, height: y2 - y1))
       let normalizedBox = normalizedRect(fromInputRect: imageRect)
       let label = labelName(for: classIndex)
 
-      boxes.append(
-        Box(index: classIndex, cls: label, conf: conf, xywh: imageRect, xywhn: normalizedBox))
+      var box = Box(index: classIndex, cls: label, conf: conf, xywh: imageRect, xywhn: normalizedBox)
+      if hasAerialClassScores, numFields == 9 {
+        let scores = (0..<3).map { pointer[base + (6 + $0) * fieldStride] }
+        if scores.indices.contains(classIndex), scores.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
+          abs(scores[classIndex] - conf) < 0.02 {
+          box.classScores = Dictionary(uniqueKeysWithValues: zip(labels, scores))
+        }
+      }
+      boxes.append(box)
       if boxes.count >= numItemsThreshold { break }
     }
     return boxes

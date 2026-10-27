@@ -11,24 +11,39 @@ public struct AerialTrack {
   public var trail: [CGPoint]
   public var samples: Int
   public var identificationSuppressed = false
+  public var classScores: [String: Float]?
   fileprivate var lastSeen: Double
   fileprivate var velocity: CGVector
-  fileprivate var recent: [(String, Float, Double)]
+  fileprivate var recent: [(String, Float, Double, Float?)]
+
+  private func hasEvidence(threshold: Float, count: Int, duration: Double) -> Bool {
+    guard observed, !identificationSuppressed, let last = recent.last else { return false }
+    let consistent = recent.reversed().prefix {
+      $0.0 == last.0 && $0.1 >= threshold
+        && (last.0 == "airplane" || ($0.3 ?? -1) > 0.20 + 0.000001)
+    }
+    guard consistent.count >= count, let first = consistent.last else { return false }
+    return last.2 - first.2 + 0.000001 >= duration
+  }
 
   public var classification: String {
-    guard observed, !identificationSuppressed, let last = recent.last else { return "미확인 물체" }
-    let needed = last.0 == "drone" ? 7 : 3
-    let threshold: Float = last.0 == "drone" ? 0.70 : 0.60
-    let consistent = recent.reversed().prefix { $0.0 == last.0 && $0.1 >= threshold }
-    let duration = last.0 == "drone" ? 0.30 : 0.10
-    guard consistent.count >= needed, let first = consistent.last,
-      last.2 - first.2 + 0.000001 >= duration
+    guard hasEvidence(threshold: 0.60, count: label == "drone" ? 7 : 3,
+                      duration: label == "drone" ? 0.30 : 0.10)
     else { return "미확인 물체" }
-    if last.0 == "drone" {
-      return min(box.width, box.height) >= 0.02 ? "드론" : "미확인 물체"
-    }
-    return last.0 == "bird" ? "새" : "비행기"
+    return label == "drone" ? "드론" : label == "bird" ? "새" : "비행기"
   }
+
+  /// Suspicion is still an unidentified object and must not trigger confirmed-drone broadcast.
+  public var suspicion: String? {
+    guard classification == "미확인 물체", label != "airplane",
+      hasEvidence(threshold: 0.40, count: 3, duration: 0.10) else { return nil }
+    return label == "drone" ? "드론 의심" : "새 의심"
+  }
+
+  public var displayLabel: String {
+    suspicion.map { "미확인 물체 · \($0)" } ?? classification
+  }
+
 }
 
 /// Causal motion association with one-to-one matches and ambiguity rejection.
@@ -64,6 +79,16 @@ public struct AerialTracker {
       return "drone"
     }
     return nil
+  }
+
+  private static func margin(for box: Box) -> Float? {
+    guard let scores = box.classScores, let drone = scores["drone"], let bird = scores["bird"],
+      drone.isFinite, bird.isFinite, (0...1).contains(drone), (0...1).contains(bird)
+    else { return nil }
+    let label = category(box.cls)
+    let selected = label == "drone" ? drone : bird
+    guard label == "drone" || label == "bird", abs(selected - box.conf) < 0.02 else { return nil }
+    return label == "drone" ? drone - bird : bird - drone
   }
 
   public mutating func update(boxes: [Box], time: Double) -> [AerialTrack] {
@@ -133,10 +158,11 @@ public struct AerialTracker {
         tracks[i].box = detection.xywhn
         tracks[i].label = Self.category(detection.cls)!
         tracks[i].score = detection.conf
+        tracks[i].classScores = detection.classScores
         tracks[i].observed = true
         tracks[i].lastSeen = time
         tracks[i].samples += 1
-        tracks[i].recent.append((tracks[i].label, detection.conf, time))
+        tracks[i].recent.append((tracks[i].label, detection.conf, time, Self.margin(for: detection)))
         tracks[i].recent = Array(tracks[i].recent.filter { time - $0.2 <= 1 }.suffix(64))
         tracks[i].trail.append(CGPoint(x: detection.xywhn.midX, y: detection.xywhn.midY))
         tracks[i].trail = Array(tracks[i].trail.suffix(24))
@@ -155,8 +181,8 @@ public struct AerialTracker {
         AerialTrack(
           id: nextID, box: box.xywhn, label: Self.category(box.cls)!,
           score: box.conf, observed: true, trail: [CGPoint(x: box.xywhn.midX, y: box.xywhn.midY)],
-          samples: 1, lastSeen: time, velocity: .zero,
-          recent: [(Self.category(box.cls)!, box.conf, time)]))
+          samples: 1, classScores: box.classScores, lastSeen: time, velocity: .zero,
+          recent: [(Self.category(box.cls)!, box.conf, time, Self.margin(for: box))]))
       nextID += 1
     }
     // Prefer live observations; bound history when many overlapping detections are ambiguous.

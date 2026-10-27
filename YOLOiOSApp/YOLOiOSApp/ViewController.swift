@@ -552,7 +552,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     trackWingEvidence = trackWingEvidence.filter { ids.contains($0.key) }
     // Bound image processing on the UI thread. Unmeasured motion is never positive evidence.
     let motionIDs = Set(
-      featureTracks.filter { $0.observed && $0.label == "drone" && $0.score >= 0.70 }
+      featureTracks.filter { $0.observed && $0.label == "drone" && $0.score >= 0.60 }
         .sorted { $0.score > $1.score }.prefix(4).map(\.id))
     for index in featureTracks.indices {
       let track = featureTracks[index]
@@ -669,7 +669,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     previousAlertStage = stage
     droneAlertStatusLabel.text =
       high.map { "드론 \(trackingEnabled ? "#\($0.id) " : "")\(Int($0.score * 100))점" }
-      ?? unknown.map { "미확인 물체\(trackingEnabled ? " #\($0.id)" : "")" }
+      ?? unknown.map { "\($0.displayLabel)\(trackingEnabled ? " #\($0.id)" : "")" }
       ?? observed.first.map { "\($0.classification)\(trackingEnabled ? " #\($0.id)" : "") · 경보 없음" }
       ?? "감시 중 · 현재 탐지 없음"
   }

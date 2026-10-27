@@ -95,6 +95,10 @@ public struct Box: @unchecked Sendable {
 
   /// The bounding box in normalized coordinates (0.0 to 1.0).
   public let xywhn: CGRect
+
+  /// Unfiltered class scores for this exact detection anchor, when the export supplies them.
+  /// Missing scores are not zero and cannot establish a drone-versus-bird margin.
+  public var classScores: [String: Float]? = nil
 }
 
 /// Instance-segmentation mask data from a YOLO segmentation model.

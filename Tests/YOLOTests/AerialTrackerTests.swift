@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreML
 import XCTest
 
 @testable import UltralyticsYOLO
@@ -6,7 +7,10 @@ import XCTest
 final class AerialTrackerTests: XCTestCase {
   private func box(_ label: String = "drone", _ score: Float = 0.8, _ x: CGFloat = 0.4) -> Box {
     let rect = CGRect(x: x, y: 0.4, width: 0.04, height: 0.04)
-    return Box(index: 0, cls: label, conf: score, xywh: rect, xywhn: rect)
+    var result = Box(index: 0, cls: label, conf: score, xywh: rect, xywhn: rect)
+    result.classScores = ["drone": label == "drone" ? score : 0.1,
+                          "bird": label == "bird" ? score : 0.1, "airplane": 0.1]
+    return result
   }
 
   func testStableScoreGapAndClassChange() {
@@ -47,7 +51,7 @@ final class AerialTrackerTests: XCTestCase {
   func testLowScoreAndResetCannotClaimDrone() {
     var tracker = AerialTracker()
     var tracks: [AerialTrack] = []
-    for i in 0..<10 { tracks = tracker.update(boxes: [box("drone", 0.69)], time: Double(i) * 0.05) }
+    for i in 0..<10 { tracks = tracker.update(boxes: [box("drone", 0.59)], time: Double(i) * 0.05) }
     XCTAssertEqual(tracks[0].classification, "미확인 물체")
     let id = tracks[0].id
     tracker.reset()
@@ -90,5 +94,57 @@ final class AerialTrackerTests: XCTestCase {
     XCTAssertEqual(continued.score, 0.8)
     XCTAssertEqual(continued.box.minX, 0.41)
     XCTAssertEqual(continued.classification, "미확인 물체")
+  }
+
+  func testTwentyPointMarginAndSixtyPointConfirmationForBothClasses() {
+    for label in ["drone", "bird"] {
+      for other in [Float(0.4), Float(0.399)] {
+        var tracker = AerialTracker()
+        var detection = box(label, 0.60)
+        detection.classScores?[label == "drone" ? "bird" : "drone"] = other
+        var tracks: [AerialTrack] = []
+        for i in 0..<8 { tracks = tracker.update(boxes: [detection], time: Double(i) * 0.05) }
+        XCTAssertEqual(tracks[0].classification,
+          other == 0.4 ? "미확인 물체" : label == "drone" ? "드론" : "새")
+        if other == 0.4 { XCTAssertNil(tracks[0].suspicion) }
+      }
+    }
+  }
+
+  func testSuspicionMissingScoresAndBothLowRemainUnconfirmed() {
+    for label in ["drone", "bird"] {
+      var tracker = AerialTracker()
+      var tracks: [AerialTrack] = []
+      for i in 0..<8 { tracks = tracker.update(boxes: [box(label, 0.40)], time: Double(i) * 0.05) }
+      XCTAssertEqual(tracks[0].classification, "미확인 물체")
+      XCTAssertEqual(tracks[0].suspicion, label == "drone" ? "드론 의심" : "새 의심")
+      var missing = box(label, 0.95); missing.classScores = nil
+      for i in 8..<16 { tracks = tracker.update(boxes: [missing], time: Double(i) * 0.05) }
+      XCTAssertEqual(tracks[0].classification, "미확인 물체")
+      XCTAssertNil(tracks[0].suspicion)
+      tracks = tracker.update(boxes: [box(label, 0.29)], time: 0.8)
+      XCTAssertTrue(tracks.allSatisfy { $0.classification == "미확인 물체" })
+    }
+  }
+
+  func testSameAnchorClassVectorSurvivesEndToEndDecode() throws {
+    let detector = ObjectDetector()
+    detector.labels = ["drone", "bird", "airplane"]
+    detector.hasAerialClassScores = true
+    detector.modelInputSize = (640, 640)
+    detector.inputSize = CGSize(width: 640, height: 640)
+    let prediction = try MLMultiArray(shape: [1, 300, 9], dataType: .float32)
+    for i in 0..<prediction.count { prediction[i] = 0 }
+    for (i, value) in [100.0, 100, 140, 140, 0.65, 0, 0.65, 0.5, 0.01].enumerated() {
+      prediction[i] = NSNumber(value: value)
+    }
+    let boxes = detector.processRawResults(prediction)
+    XCTAssertEqual(boxes.count, 1)
+    XCTAssertEqual(boxes[0].classScores?["bird"], 0.5)
+    var tracker = AerialTracker()
+    var tracks: [AerialTrack] = []
+    for i in 0..<8 { tracks = tracker.update(boxes: boxes, time: Double(i) * 0.05) }
+    XCTAssertEqual(tracks[0].classification, "미확인 물체")
+    XCTAssertNil(tracks[0].suspicion)
   }
 }

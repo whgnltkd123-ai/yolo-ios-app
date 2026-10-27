@@ -29,7 +29,7 @@ final class AerialTrackOverlay: UIView {
       context.strokePath()
       let text =
         track.observed
-        ? "\(showsTrackIDs ? "#\(track.id) " : "")\(track.classification) \(Int(track.score * 100))점"
+        ? "\(showsTrackIDs ? "#\(track.id) " : "")\(track.displayLabel) \(Int(track.score * 100))점"
         : "#\(track.id) 추적 끊김"
       (text as NSString).draw(
         at: CGPoint(x: max(0, frame.minX), y: max(0, frame.minY - 22)),
@@ -123,7 +123,8 @@ final class AerialEvidenceStore {
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let objects: [[String: Any]] = eligible.map {
       [
-        "trackID": $0.id, "displayClass": $0.classification, "modelClass": $0.label,
+        "trackID": $0.id, "displayClass": $0.classification, "suspicion": $0.suspicion ?? "", "modelClass": $0.label,
+        "classScores": $0.classScores ?? [:],
         "score": $0.score,
         "normalizedBox": [$0.box.minX, $0.box.minY, $0.box.width, $0.box.height],
       ]
@@ -173,7 +174,7 @@ final class AerialEvidenceStore {
               AerialTrackOverlay.color(track.classification).cgColor)
             renderer.cgContext.setLineWidth(3)
             renderer.cgContext.stroke(box)
-            let text = "#\(track.id) \(track.classification) \(Int(track.score * 100))점"
+            let text = "#\(track.id) \(track.displayLabel) \(Int(track.score * 100))점"
             (text as NSString).draw(
               at: CGPoint(x: box.minX, y: max(0, box.minY - 26)),
               withAttributes: [

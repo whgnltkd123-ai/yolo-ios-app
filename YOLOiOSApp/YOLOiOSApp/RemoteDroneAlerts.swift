@@ -133,7 +133,7 @@ final class RemoteDroneAlerts: NSObject, UNUserNotificationCenterDelegate {
   func publish(trackID: Int, score: Float) {
     let now = CACurrentMediaTime()
     guard let membership, membership.canPublish, !publishing,
-      score >= 0.70, now - lastPublished >= 10,
+      score >= 0.60, now - lastPublished >= 10,
       now - (lastPublishedTrack[trackID] ?? -.infinity) >= 60
     else { return }
     publishing = true

@@ -27,6 +27,27 @@ import certifi
 from ultralytics import YOLO
 
 DEST = Path("YOLOiOSApp/Models/Detect/yolo26n-aerial3.mlpackage")
+SCORE_SCHEMA = "xyxy_conf_class_drone_bird_airplane_v1"
+
+
+def retain_aerial_class_scores(model):
+    """Keep original one2one TopK selection and attach its same-anchor class vector."""
+    from types import MethodType
+    from ultralytics.nn.modules.head import Detect
+
+    head = model.model[-1]
+    if type(head) is not Detect or head.nc != 3 or getattr(head, "one2one_cv2", None) is None:
+        raise RuntimeError("Expected the trained three-class YOLO26 one2one detection head")
+    head.postprocess = MethodType(aerial_postprocess, head)
+
+
+def aerial_postprocess(head, predictions):
+    import torch
+
+    boxes, class_scores = predictions.split((4, 3), dim=-1)
+    score, label, anchor = head.get_topk_index(class_scores, head.max_det)
+    return torch.cat((head._gather(boxes, anchor), score, label,
+                      head._gather(class_scores, anchor)), dim=-1)
 
 
 def download_verified_weights() -> Path:
@@ -89,9 +110,12 @@ def verify_coreml_export(weights: Path, export_path: Path, imgsz: int) -> dict:
     torch.set_num_threads(4)
     reference = YOLO(str(weights)).model.cpu().float().eval()
     reference.end2end = True  # Match the exporter's explicit nms=False branch.
+    retain_aerial_class_scores(reference)
     converted = ct.models.MLModel(str(export_path), compute_units=ct.ComputeUnit.CPU_ONLY)
     source_sha = hashlib.sha256(weights.read_bytes()).hexdigest()
     converted.user_defined_metadata["checkpoint_sha256"] = source_sha
+    converted.user_defined_metadata["aerial_score_schema"] = SCORE_SCHEMA
+    converted.user_defined_metadata["nms"] = "False"
     spec = converted.get_spec()
     if len(spec.description.output) != 1:
         raise RuntimeError("Expected one end-to-end detection tensor")
@@ -108,7 +132,7 @@ def verify_coreml_export(weights: Path, export_path: Path, imgsz: int) -> dict:
             raw = reference(tensor)
         expected = (raw[0] if isinstance(raw, tuple) else raw).detach().numpy()[0]
         actual = np.asarray(converted.predict({"image": Image.fromarray(rgb)})[output_name])[0]
-        if expected.shape != actual.shape or expected.shape != (300, 6):
+        if expected.shape != actual.shape or expected.shape != (300, 9):
             raise RuntimeError(f"Unexpected detection shape: {expected.shape}, {actual.shape}")
         if not np.isfinite(actual).all():
             raise RuntimeError("Non-finite Core ML output")
@@ -128,6 +152,7 @@ def verify_coreml_export(weights: Path, export_path: Path, imgsz: int) -> dict:
                 delta, index = min(candidates, default=(float("inf"), -1))
                 if index < 0 or delta > 4.0 or abs(float(row[4] - right[index, 4])) > 0.02:
                     raise RuntimeError(f"Core ML conversion mismatch: {fixture.name}")
+                np.testing.assert_allclose(row[6:9], right[index, 6:9], atol=0.02, rtol=0.05)
                 used.add(index)
                 max_box_delta = max(max_box_delta, delta)
                 max_score_delta = max(max_score_delta, abs(float(row[4] - right[index, 4])))
@@ -146,6 +171,8 @@ def verify_coreml_export(weights: Path, export_path: Path, imgsz: int) -> dict:
         "classes": ["drone", "bird", "airplane"],
         "input_size": imgsz,
         "conversion_smoke_passed": True,
+        "aerial_score_schema": SCORE_SCHEMA,
+        "comparison": "one2one TopK with unfiltered same-anchor scores, not other overlapping boxes",
         "checks": checks,
         "limitations": "Three public frames only; not an accuracy gate or iPhone camera/device validation.",
     }
@@ -176,6 +203,7 @@ def main():
     if imgsz not in (416, 512, 640):
         raise SystemExit("YOLO26_DRONE_IMGSZ must be 416, 512, or 640.")
     print("Exporting trained detection checkpoint as end-to-end Core ML at", imgsz)
+    retain_aerial_class_scores(model.model)
     export_path = Path(str(model.export(format="coreml", imgsz=imgsz, nms=False, device="cpu")))
     if not export_path.is_dir() or export_path.suffix != ".mlpackage":
         raise SystemExit(f"Core ML export failed: {export_path}")
