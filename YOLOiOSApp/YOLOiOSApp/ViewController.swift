@@ -136,11 +136,13 @@ private struct WingMotionEvidence {
   private var samples: [(time: Double, shape: Double)] = []
   private var previousBox: CGRect?
   private var evidenceUntil = 0.0
+  private var lockedSide: CGFloat?
 
   mutating func reset() {
     samples.removeAll(keepingCapacity: true)
     previousBox = nil
     evidenceUntil = 0
+    lockedSide = nil
   }
 
   mutating func update(image: UIImage?, box: CGRect, time: Double) -> Bool {
@@ -156,9 +158,12 @@ private struct WingMotionEvidence {
         reset()
       }
     }
-    previousBox = box
     let width = CGFloat(source.width), height = CGFloat(source.height)
-    let side = max(box.width * width, box.height * height) * 1.4
+    let extent = max(box.width * width, box.height * height)
+    if let lockedSide, extent > lockedSide / 1.2 { reset() }
+    if lockedSide == nil { lockedSide = extent * 1.6 }
+    previousBox = box
+    guard let side = lockedSide else { return false }
     let rect = CGRect(x: box.midX * width - side / 2, y: box.midY * height - side / 2,
                       width: side, height: side).integral
     guard CGRect(x: 0, y: 0, width: width, height: height).contains(rect),
@@ -261,11 +266,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private let droneAlertStatusLabel = UILabel()
   private let droneAlertAudio = DroneAlertSoundPlayer()
   private var droneAlertEnabled = true
-  private var droneCandidateFrames = 0
-  private var previousDroneBox: CGRect?
-  private var previousCandidateClass: String?
-  private var wingMotion = WingMotionEvidence()
-  private var recentDroneConfidence: [Float] = []
   private var previousAlertStage: DroneAlertStage = .none
   private let monitoringButton = UIButton(type: .system)
   private let monitoringStatusLabel = UILabel()
@@ -280,7 +280,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
   // Sending to others always starts off for each app launch.
   private var broadcastEnabled = false
   private var resultsExpiry: DispatchWorkItem?
-  private var usesFeatureTracking: Bool { trackingEnabled || evidenceEnabled || broadcastEnabled }
+  private var aerialDecisionEnabled = false
+  private var usesFeatureTracking: Bool { aerialDecisionEnabled || trackingEnabled || evidenceEnabled || broadcastEnabled }
 
   private func installDroneAlertControls() {
     trackingOverlay.backgroundColor = .clear
@@ -364,11 +365,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private func resetDroneCandidate() {
     droneAlertAudio.stop()
-    droneCandidateFrames = 0
-    previousDroneBox = nil
-    previousCandidateClass = nil
-    wingMotion.reset()
-    recentDroneConfidence.removeAll(keepingCapacity: true)
     previousAlertStage = .none
   }
 
@@ -383,8 +379,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private func applyMonitoringSettings() {
     yoloView.capturesOriginalImage = droneAlertEnabled || usesFeatureTracking
-    yoloView.showOverlays = !(trackingEnabled && currentTask == "Detect")
-    trackingOverlay.isHidden = !trackingEnabled || currentTask != "Detect"
+    yoloView.showOverlays = !(usesFeatureTracking && currentTask == "Detect")
+    trackingOverlay.isHidden = !usesFeatureTracking || currentTask != "Detect"
     monitoringStatusLabel.text = "추적 \(trackingEnabled ? "ON" : "OFF") · 자동 채증 \(evidenceEnabled ? "ON" : "OFF") · 전송 \(broadcastEnabled ? "ON" : "OFF")"
     UserDefaults.standard.set(trackingEnabled, forKey: "aerial.tracking")
     UserDefaults.standard.set(evidenceEnabled, forKey: "aerial.evidence")
@@ -461,6 +457,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
   }
 
   private func processAerialFeatures(result: YOLOResult) {
+    aerialDecisionEnabled = result.names.contains(where: isBirdClass) && result.names.contains(where: isDroneClass)
+    yoloView.capturesOriginalImage = droneAlertEnabled || usesFeatureTracking
     applyOverlayVisibility()
     guard usesFeatureTracking, currentTask == "Detect", UIApplication.shared.applicationState == .active,
       presentedViewController == nil, viewIfLoaded?.window != nil else {
@@ -472,20 +470,31 @@ class ViewController: UIViewController, YOLOViewDelegate {
     featureTracks = tracker.update(boxes: result.boxes, time: now)
     let ids = Set(featureTracks.map(\.id))
     trackWingEvidence = trackWingEvidence.filter { ids.contains($0.key) }
+    // Bound image processing on the UI thread. Unmeasured motion is never positive evidence.
+    let motionIDs = Set(featureTracks.filter { $0.observed && $0.label == "drone" && $0.score >= 0.70 }
+      .sorted { $0.score > $1.score }.prefix(4).map(\.id))
     for index in featureTracks.indices {
       let track = featureTracks[index]
       guard track.observed else { trackWingEvidence[track.id] = nil; continue }
       var motion = trackWingEvidence[track.id] ?? WingMotionEvidence()
-      let wingMotion = motion.update(image: result.originalImage, box: track.box, time: now)
-      let contradictory = result.boxes.contains {
-        (isBirdClass($0.cls) || isAirplaneClass($0.cls)) && $0.conf >= 0.60
-          && $0.conf >= track.score * 0.75 && overlaps($0.xywhn, track.box)
+      let wingMotion: Bool
+      if motionIDs.contains(track.id) {
+        wingMotion = motion.update(image: result.originalImage, box: track.box, time: now)
+      } else {
+        motion.reset(); wingMotion = false
       }
-      featureTracks[index].identificationSuppressed = track.label == "drone" && (wingMotion || contradictory)
+      let contradictory = result.boxes.contains {
+        AerialTracker.category($0.cls) != nil && AerialTracker.category($0.cls) != track.label
+          && $0.conf >= 0.60 && $0.conf >= track.score * 0.75 && overlaps($0.xywhn, track.box)
+      }
+      let suppressed = contradictory || (track.label == "drone" && wingMotion)
+      featureTracks[index].identificationSuppressed = suppressed
+      if suppressed { tracker.suppressIdentification(for: track.id) }
       trackWingEvidence[track.id] = motion
     }
     trackingOverlay.imageSize = result.orig_shape
-    trackingOverlay.tracks = trackingEnabled ? featureTracks : []
+    trackingOverlay.showsTrackIDs = trackingEnabled
+    trackingOverlay.tracks = usesFeatureTracking ? featureTracks : []
     resultsExpiry?.cancel()
     let expiry = DispatchWorkItem { [weak self] in self?.clearFeatureTracking() }
     resultsExpiry = expiry
@@ -508,27 +517,17 @@ class ViewController: UIViewController, YOLOViewDelegate {
   }
 
   private func applyOverlayVisibility() {
-    let overlays = !(trackingEnabled && currentTask == "Detect")
+    let overlays = !(usesFeatureTracking && currentTask == "Detect")
     if yoloView.showOverlays != overlays { yoloView.showOverlays = overlays }
-    trackingOverlay.isHidden = !trackingEnabled || currentTask != "Detect"
+    trackingOverlay.isHidden = !usesFeatureTracking || currentTask != "Detect"
   }
 
   private func isBirdClass(_ value: String) -> Bool {
-    ["bird", "birds"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
-  }
-
-  private func isAirplaneClass(_ value: String) -> Bool {
-    ["airplane", "aeroplane", "plane"].contains(
-      value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    AerialTracker.category(value) == "bird"
   }
 
   private func isDroneClass(_ value: String) -> Bool {
-    let label = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let droneClasses: Set<String> = [
-      "drone", "drones", "uav", "uas", "quadcopter", "multicopter",
-      "fpv drone", "fpv-drone", "unmanned aerial vehicle", "fixed-wing", "fixed wing",
-    ]
-    return droneClasses.contains(label) || label.hasPrefix("drone ") || label.hasSuffix(" drone")
+    AerialTracker.category(value) == "drone"
   }
 
   private func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
@@ -536,16 +535,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
     guard !intersection.isNull else { return false }
     let union = a.width * a.height + b.width * b.height - intersection.width * intersection.height
     return union > 0 && (intersection.width * intersection.height / union) >= 0.25
-  }
-
-  private func matchesPreviousDrone(_ rect: CGRect) -> Bool {
-    guard let previous = previousDroneBox else { return false }
-    if overlaps(rect, previous) { return true }
-    let dx = rect.midX - previous.midX
-    let dy = rect.midY - previous.midY
-    // Much tighter than the previous 18%-of-screen rule; scale tolerance to target size.
-    let tolerance = max(CGFloat(0.025), min(CGFloat(0.085), max(rect.width, rect.height) * 1.5))
-    return (dx * dx + dy * dy) <= tolerance * tolerance
   }
 
   private func soundForStableStage(_ stage: DroneAlertStage) {
@@ -578,91 +567,16 @@ class ViewController: UIViewController, YOLOViewDelegate {
       droneAlertStatusLabel.text = "새·드론 구분 모델을 선택하세요"
       return
     }
-    if usesFeatureTracking {
-      let observed = featureTracks.filter(\.observed)
-      let high = observed.first { $0.classification == "드론" }
-      let unknown = observed.first { $0.classification == "미확인 물체" && $0.samples >= 3 }
-      let stage: DroneAlertStage = high != nil ? .high : (unknown != nil ? .unknown : .none)
-      if stage == .none { droneAlertAudio.stop() } else { soundForStableStage(stage) }
-      previousAlertStage = stage
-      droneAlertStatusLabel.text = high.map { "드론 #\($0.id) \(Int($0.score * 100))점" }
-        ?? unknown.map { "미확인 물체 #\($0.id)" }
-        ?? observed.first.map { "\($0.classification) #\($0.id) · 경보 없음" }
-        ?? "감시 중 · 현재 탐지 없음"
-      return
-    }
-
-    let otherAircraft = result.boxes.filter {
-      (isBirdClass($0.cls) || isAirplaneClass($0.cls)) && $0.conf >= 0.60
-    }
-    let minimumConfidence = max(Float(yoloView.sliderConf.value), 0.30)
-    let candidates = result.boxes
-      .filter {
-        let isUncertainAerial = (isBirdClass($0.cls) || isAirplaneClass($0.cls))
-          && $0.conf < 0.60
-        return (isDroneClass($0.cls) || isUncertainAerial) && $0.conf >= minimumConfidence
-      }
-      .filter { candidate in
-        !otherAircraft.contains(where: { other in
-          other.conf >= candidate.conf * 0.75 && overlaps(other.xywhn, candidate.xywhn)
-        })
-      }
-
-    guard let candidate = candidates.max(by: { $0.conf < $1.conf }) else {
-      resetDroneCandidate()
-      if let other = otherAircraft.max(by: { $0.conf < $1.conf }) {
-        let label = isBirdClass(other.cls) ? "새" : "비행기 후보"
-        droneAlertStatusLabel.text = String(
-          format: "%@ %.0f%% · 경보 없음", label, other.conf * 100)
-      } else {
-        droneAlertStatusLabel.text = "감시 중 · 확인된 드론 후보 없음"
-      }
-      return
-    }
-
-    if matchesPreviousDrone(candidate.xywhn) && previousCandidateClass == candidate.cls {
-      droneCandidateFrames = min(30, droneCandidateFrames + 1)
-    } else {
-      droneCandidateFrames = 1
-      wingMotion.reset()
-      recentDroneConfidence.removeAll(keepingCapacity: true)
-      previousAlertStage = .none
-    }
-    previousDroneBox = candidate.xywhn
-    previousCandidateClass = candidate.cls
-    recentDroneConfidence.append(candidate.conf)
-    if recentDroneConfidence.count > 8 { recentDroneConfidence.removeFirst() }
-    let averageConfidence = recentDroneConfidence.reduce(Float(0), +)
-      / Float(recentDroneConfidence.count)
-    // Very small, dot-like regions must not be promoted to "high" solely by model score.
-    let hasResolvableShape = min(candidate.xywhn.width, candidate.xywhn.height) >= 0.02
-    let wingLikeMotion = wingMotion.update(
-      image: result.originalImage, box: candidate.xywhn, time: CACurrentMediaTime())
-
-    let stage: DroneAlertStage
-    if wingLikeMotion {
-      stage = .unknown
-      droneAlertStatusLabel.text = "미확인 물체 · 날개짓 유사 움직임(실험)"
-    } else if isDroneClass(candidate.cls) && droneCandidateFrames >= 7 && averageConfidence >= 0.70
-      && candidate.conf >= 0.70 && hasResolvableShape {
-      stage = .high
-      droneAlertStatusLabel.text = String(
-        format: "드론 %.0f%%", averageConfidence * 100)
-    } else {
-      stage = .unknown
-      droneAlertStatusLabel.text = String(
-        format: "미확인 물체 %.0f%%", averageConfidence * 100)
-    }
-
-    // Unknown objects only generate their quieter alarm after tracking across multiple frames.
-    let stableEnoughToSound = stage != .unknown
-      || (droneCandidateFrames >= 3 && averageConfidence >= minimumConfidence)
-    if stableEnoughToSound {
-      soundForStableStage(stage)
-    } else {
-      droneAlertAudio.stop()
-    }
+    let observed = featureTracks.filter(\.observed)
+    let high = observed.first { $0.classification == "드론" }
+    let unknown = observed.first { $0.classification == "미확인 물체" && $0.samples >= 3 }
+    let stage: DroneAlertStage = high != nil ? .high : (unknown != nil ? .unknown : .none)
+    if stage == .none { droneAlertAudio.stop() } else { soundForStableStage(stage) }
     previousAlertStage = stage
+    droneAlertStatusLabel.text = high.map { "드론 \(trackingEnabled ? "#\($0.id) " : "")\(Int($0.score * 100))점" }
+      ?? unknown.map { "미확인 물체\(trackingEnabled ? " #\($0.id)" : "")" }
+      ?? observed.first.map { "\($0.classification)\(trackingEnabled ? " #\($0.id)" : "") · 경보 없음" }
+      ?? "감시 중 · 현재 탐지 없음"
   }
 
   // MARK: - Constants

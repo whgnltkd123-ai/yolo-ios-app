@@ -53,4 +53,40 @@ final class AerialTrackerTests: XCTestCase {
     XCTAssertNotEqual(tracks[0].id, id)
     XCTAssertEqual(tracks[0].classification, "미확인 물체")
   }
+
+  func testHighFrameRateCannotShortenConfirmationTime() {
+    var tracker = AerialTracker()
+    var tracks: [AerialTrack] = []
+    for i in 0..<7 { tracks = tracker.update(boxes: [box()], time: Double(i) / 120) }
+    XCTAssertEqual(tracks[0].classification, "미확인 물체")
+    for i in 7...36 { tracks = tracker.update(boxes: [box()], time: Double(i) / 120) }
+    XCTAssertEqual(tracks[0].classification, "드론")
+  }
+
+  func testWeakObservationKeepsIDButClearsConfirmation() {
+    var tracker = AerialTracker()
+    var tracks: [AerialTrack] = []
+    for i in 0..<7 { tracks = tracker.update(boxes: [box()], time: Double(i) * 0.05) }
+    let id = tracks[0].id
+    tracks = tracker.update(boxes: [box("drone", 0.35)], time: 0.35)
+    XCTAssertEqual(tracks[0].id, id)
+    XCTAssertEqual(tracks[0].classification, "미확인 물체")
+    tracks = tracker.update(boxes: [box()], time: 0.40)
+    XCTAssertEqual(tracks[0].classification, "미확인 물체")
+    tracker.suppressIdentification(for: id)
+    tracks = tracker.update(boxes: [box()], time: 0.45)
+    XCTAssertEqual(tracks[0].id, id)
+    XCTAssertEqual(tracks[0].samples, 1)
+    XCTAssertEqual(tracks[0].classification, "미확인 물체")
+  }
+
+  func testStrongObservationTakesPriorityOverCloserWeakBox() {
+    var tracker = AerialTracker()
+    let first = tracker.update(boxes: [box()], time: 0)[0]
+    let tracks = tracker.update(boxes: [box("drone", 0.35), box("drone", 0.8, 0.41)], time: 0.05)
+    let continued = tracks.first { $0.id == first.id }!
+    XCTAssertEqual(continued.score, 0.8)
+    XCTAssertEqual(continued.box.minX, 0.41)
+    XCTAssertEqual(continued.classification, "미확인 물체")
+  }
 }

@@ -7,10 +7,11 @@ import UltralyticsYOLO
 final class AerialTrackOverlay: UIView {
   var tracks: [AerialTrack] = [] { didSet { setNeedsDisplay() } }
   var imageSize = CGSize.zero
+  var showsTrackIDs = true { didSet { setNeedsDisplay() } }
 
   override func draw(_ rect: CGRect) {
     guard let context = UIGraphicsGetCurrentContext() else { return }
-    for track in tracks {
+    for track in tracks where showsTrackIDs || track.observed {
       let color = track.observed ? Self.color(track.classification) : UIColor.lightGray
       let frame = aspectFillDisplayRect(for: track.box, imageSize: imageSize, viewSize: bounds.size)
       context.setStrokeColor(color.cgColor)
@@ -18,14 +19,14 @@ final class AerialTrackOverlay: UIView {
       context.setLineDash(phase: 0, lengths: track.observed ? [] : [5, 4])
       context.stroke(frame)
       context.beginPath()
-      for (index, point) in track.trail.enumerated() {
+      for (index, point) in (showsTrackIDs ? track.trail : []).enumerated() {
         let mapped = aspectFillDisplayRect(for: CGRect(origin: point, size: .zero),
           imageSize: imageSize, viewSize: bounds.size).origin
         if index == 0 { context.move(to: mapped) } else { context.addLine(to: mapped) }
       }
       context.strokePath()
       let text = track.observed
-        ? "#\(track.id) \(track.classification) \(Int(track.score * 100))점"
+        ? "\(showsTrackIDs ? "#\(track.id) " : "")\(track.classification) \(Int(track.score * 100))점"
         : "#\(track.id) 추적 끊김"
       (text as NSString).draw(at: CGPoint(x: max(0, frame.minX), y: max(0, frame.minY - 22)),
         withAttributes: [.font: UIFont.systemFont(ofSize: 14, weight: .semibold),

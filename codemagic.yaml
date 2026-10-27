@@ -105,6 +105,9 @@ workflows:
         - pattern: feat/reinforced-aerial-model
           include: true
           source: true
+        - pattern: feat/stable-aerial-tracking
+          include: true
+          source: true
       cancel_previous_builds: true
     environment:
       xcode: latest
@@ -139,7 +142,7 @@ workflows:
       - name: Verify causal tracker regressions on iOS Simulator
         script: |
           set -euo pipefail
-          case "$CM_BRANCH" in feat/tracking-evidence-alerts|feat/reinforced-aerial-model) ;; *) exit 0 ;; esac
+          case "$CM_BRANCH" in feat/tracking-evidence-alerts|feat/reinforced-aerial-model|feat/stable-aerial-tracking) ;; *) exit 0 ;; esac
           IOS_SIMULATOR=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if "iOS" in k for x in v if "iPhone" in x["name"] and x["isAvailable"]))')
           xcodebuild -scheme UltralyticsYOLO -sdk iphonesimulator \
             -destination "platform=iOS Simulator,id=$IOS_SIMULATOR,arch=arm64" \
