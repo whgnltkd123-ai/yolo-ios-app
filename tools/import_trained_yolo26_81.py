@@ -5,6 +5,7 @@ Codemagic-only packaging step. It fails closed without the user's verified
 trained .pt. PyTorch checkpoint deserialization may execute code: NEVER import
 untrusted third-party weights in a build with signing secrets.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -16,9 +17,9 @@ import urllib.request
 from pathlib import Path
 
 import certifi
+import ultralytics
 import yaml
 from ultralytics import YOLO
-import ultralytics
 
 OUT = Path("YOLOiOSApp/Models/Detect/yolo26n-drone81.mlpackage")
 
@@ -69,7 +70,7 @@ def main():
         raise RuntimeError("Checkpoint must be a YOLO object detector.")
     coco_yaml = Path(ultralytics.__file__).resolve().parent / "cfg" / "datasets" / "coco.yaml"
     coco_names = names_list(yaml.safe_load(coco_yaml.read_text(encoding="utf-8"))["names"])
-    expected = coco_names + ["drone"]
+    expected = [*coco_names, "drone"]
     names = names_list(model.names)
     if len(coco_names) != 80 or names != expected:
         raise RuntimeError("Not a true COCO-80 + drone (id 80) checkpoint; refusing mislabelled model.")

@@ -1,78 +1,71 @@
 {
-  "sha256": "96c48c83c0ac6210187d4cfadf05dfb0ef337de91e8a368cbde81f82bbb07b03",
+  "sha256": "f1701e53e9952b9cfc3726fb118d3f718de2908973a5021dff90731db1b23b0e",
   "parent_sha256": "024b3ba7a552a9b52a88cb6de05cf6c2927b8db242ae2d792c215d602e450371",
-  "training_run": 362665966,
-  "epochs": 50,
-  "classes": [
-    "drone",
-    "bird",
-    "airplane"
-  ],
+  "training_run": 362771654,
+  "epochs": 15,
+  "classes": ["drone", "bird", "airplane"],
   "input_size": 640,
-  "fixed_thresholds": {
-    "drone": 0.7,
-    "bird": 0.6,
-    "airplane": 0.6
-  },
-  "public270": {
-    "drone": {
-      "tp": 9,
-      "fp": 28,
-      "gt": 98,
-      "precision": 0.24324324324324326,
-      "recall": 0.09183673469387756
+  "sources": ["Seraphim", "COCO", "MIT flight frames", "LAT reviewed RGB birds", "USC MCL RGB drones"],
+  "unique_training_images": 16788,
+  "legacy_evaluation": {
+    "fixed_thresholds": {
+      "drone": 0.7,
+      "bird": 0.6,
+      "airplane": 0.6
     },
-    "bird": {
-      "tp": 0,
-      "fp": 0,
-      "gt": 102,
-      "precision": 0,
-      "recall": 0
+    "public270": {
+      "drone": {
+        "tp": 10,
+        "fp": 33,
+        "gt": 98,
+        "precision": 0.23255813953488372,
+        "recall": 0.10204081632653061
+      },
+      "bird": {
+        "tp": 0,
+        "fp": 0,
+        "gt": 102,
+        "precision": 0.0,
+        "recall": 0.0
+      },
+      "airplane": {
+        "tp": 21,
+        "fp": 9,
+        "gt": 90,
+        "precision": 0.7,
+        "recall": 0.23333333333333334
+      }
     },
-    "airplane": {
-      "tp": 13,
-      "fp": 10,
-      "gt": 90,
-      "precision": 0.5652173913043478,
-      "recall": 0.14444444444444443
-    }
-  },
-  "cached_baseline": {
-    "drone": {
-      "tp": 9,
-      "fp": 25,
-      "gt": 98,
-      "precision": 0.2647058823529412,
-      "recall": 0.09183673469387756
+    "background71": {
+      "drone": 0,
+      "bird": 0,
+      "airplane": 0
     },
-    "bird": {
-      "tp": 0,
-      "fp": 0,
-      "gt": 102,
-      "precision": 0,
-      "recall": 0
+    "private292": {
+      "drone70": 0,
+      "bird60": 0,
+      "frames_without_detection": 187
     },
-    "airplane": {
-      "tp": 17,
-      "fp": 9,
-      "gt": 90,
-      "precision": 0.6538461538461539,
-      "recall": 0.18888888888888888
-    }
+    "accuracy_gate_passed": false,
+    "mode": "Default PyTorch predictor; preserved diagnostic, not the new app decision policy"
   },
-  "background71_fixed_threshold": {
-    "drone": 0,
-    "bird": 0,
-    "airplane": 0
+  "app_policy": {
+    "suspected_min": 0.4,
+    "confirmed_drone_min": 0.6,
+    "confirmed_bird_min": 0.6,
+    "same_anchor_margin_strictly_greater_than": 0.2,
+    "exact_20_unknown": true,
+    "missing_class_vector_unknown": true,
+    "both_below_30_unknown": true,
+    "drone_consecutive": 7,
+    "drone_min_seconds": 0.3,
+    "bird_consecutive": 3,
+    "bird_min_seconds": 0.1,
+    "suspect_consecutive": 3,
+    "suspect_min_seconds": 0.1
   },
-  "private292_summary": {
-    "high_drone": 0,
-    "high_bird": 0,
-    "frames_without_detection": 275
-  },
-  "accuracy_gate_passed": false,
-  "user_application_override": "2026-10-27: user requested applying this reinforced model after being told the failed fixed-threshold evaluation.",
-  "conversion_and_device_verification": "Pending build; no installation claim.",
-  "limitations": "Legacy public scene overlap/loose boxes; controlled background crops; no independent field, distance or temporal wingbeat claim.",
-  "conversion_mode": "Explicit nms=False end-to-end; reference uses same one-to-one head. Prior fixed diagnostic used the default PyTorch predictor; report preserved unchanged."
+  "user_application_request": "2026-10-27: install the latest completed reinforcement with the newly selected decision rules; do not wait for the separate running 50-epoch job.",
+  "conversion_mode": "nms=False one2one TopK with same-anchor three-class score vector",
+  "device_install_verified": false,
+  "limitations": "Legacy public scene overlap and loose boxes; no new-policy accuracy, independent field, distance or temporal wingbeat claim. LAT CC BY-NC-SA 4.0 terms retained; no commercial distribution permission claimed."
 }

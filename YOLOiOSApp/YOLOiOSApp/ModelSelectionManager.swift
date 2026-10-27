@@ -31,19 +31,23 @@ struct ModelSelectionManager {
     for model in models {
       let baseName = (model.name as NSString).deletingPathExtension.lowercased()
       guard baseName.hasPrefix("yolo"),
-            let sizeChar = extractSizeFromModelName(baseName),
-            let size = ModelSize(rawValue: String(sizeChar))
+        let sizeChar = extractSizeFromModelName(baseName),
+        let size = ModelSize(rawValue: String(sizeChar))
       else { continue }
 
       if size == .n {
         let priority: Int
-        if baseName == "yolo26n-aerial3" { priority = 120 }
-        else if baseName == "yolo26n-drone81" { priority = 100 }
-        else if baseName == "yolo26n" || baseName.hasPrefix("yolo26n.mlpackage") {
+        if baseName == "yolo26n-aerial3" {
+          priority = 120
+        } else if baseName == "yolo26n-drone81" {
+          priority = 100
+        } else if baseName == "yolo26n" || baseName.hasPrefix("yolo26n.mlpackage") {
           priority = 80
+        } else if baseName.contains("birddrone") {
+          priority = 0
+        } else {
+          priority = 10
         }
-        else if baseName.contains("birddrone") { priority = 0 }
-        else { priority = 10 }
 
         // A local bundled model wins over a remote model of the same priority.
         let adjusted = priority + (model.isLocal ? 1 : 0)

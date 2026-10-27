@@ -164,7 +164,7 @@ export function alertServer({ db, sendPush, now = Date.now }) {
       const { eventID, score, observedAt } = await readBody(req);
       authenticate(req); // Revocation may have occurred while the request body was arriving.
       if (typeof eventID !== "string" || !/^[0-9a-f-]{36}$/i.test(eventID) ||
-          !Number.isFinite(score) || score < 0.70 || score > 1 ||
+          !Number.isFinite(score) || score < 0.60 || score > 1 ||
           !Number.isFinite(observedAt) || Math.abs(now() / 1000 - observedAt) > 60)
         throw failure(400, "Invalid or stale detection event");
       const existing = db.prepare("SELECT accepted,failed,state FROM events WHERE sender=? AND id=?")

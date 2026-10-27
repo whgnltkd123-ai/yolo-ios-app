@@ -507,7 +507,8 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   func showBoxes(predictions: YOLOResult) {
     // Iterate directly without constructing a filtered array on every frame.
     // Inference still evaluates every class provided by the selected model.
-    let isBirdDroneModel = modelName.lowercased().contains("birddrone") || modelName.lowercased().contains("drone81")
+    let isBirdDroneModel =
+      modelName.lowercased().contains("birddrone") || modelName.lowercased().contains("drone81")
     let maxVisible = min(50, boundingBoxViews.count)
     let viewSize = bounds.size
     var shown = 0
@@ -515,14 +516,16 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     for prediction in predictions.boxes {
       if shown >= maxVisible { break }
       if task == .detect && showsOnlyAerialDetections
-        && !isAerialDetectionClass(prediction.cls) {
+        && !isAerialDetectionClass(prediction.cls)
+      {
         continue
       }
       // Suppress particularly weak speck detections in the legacy test model.
       if isBirdDroneModel
         && prediction.cls.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "drone"
         && (prediction.conf < 0.40
-          || min(prediction.xywhn.width, prediction.xywhn.height) < 0.004) {
+          || min(prediction.xywhn.width, prediction.xywhn.height) < 0.004)
+      {
         continue
       }
       let rect = aspectFillDisplayRect(
@@ -603,24 +606,34 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       "drone", "drones", "uav", "uas", "quadcopter", "multicopter",
       "fpv drone", "fpv-drone", "unmanned aerial vehicle", "fixed-wing", "fixed wing",
     ]
-    let isDroneLabel = droneClasses.contains(normalizedClass)
+    let isDroneLabel =
+      droneClasses.contains(normalizedClass)
       || normalizedClass.hasPrefix("drone ") || normalizedClass.hasSuffix(" drone")
-    let isUncertain = (birdClasses.contains(normalizedClass)
-      || airplaneClasses.contains(normalizedClass) || isDroneLabel)
+    let isUncertain =
+      (birdClasses.contains(normalizedClass)
+        || airplaneClasses.contains(normalizedClass) || isDroneLabel)
       && (confidence < (isDroneLabel ? 0.70 : 0.60) || (isDroneLabel && smallTarget))
-    let color: UIColor = isUncertain ? .systemYellow : birdClasses.contains(normalizedClass)
-      ? .systemGreen
-      : airplaneClasses.contains(normalizedClass) ? .systemBlue
-      : isDroneLabel
-        ? .systemRed
-        : ultralyticsColors[classIndex % ultralyticsColors.count]
+    let color: UIColor =
+      isUncertain
+      ? .systemYellow
+      : birdClasses.contains(normalizedClass)
+        ? .systemGreen
+        : airplaneClasses.contains(normalizedClass)
+          ? .systemBlue
+          : isDroneLabel
+            ? .systemRed
+            : ultralyticsColors[classIndex % ultralyticsColors.count]
     // These are single-frame scores, not independently confirmed identities.
-    let localizedClass = isUncertain ? "미확인 물체"
-      : birdClasses.contains(normalizedClass) ? "새"
-      : airplaneClasses.contains(normalizedClass) ? "비행기 후보"
-      : isDroneLabel
-        ? "드론"
-        : className
+    let localizedClass =
+      isUncertain
+      ? "미확인 물체"
+      : birdClasses.contains(normalizedClass)
+        ? "새"
+        : airplaneClasses.contains(normalizedClass)
+          ? "비행기 후보"
+          : isDroneLabel
+            ? "드론"
+            : className
     let label = DetectionLabelStyle.text(className: localizedClass, confidence: confidence)
     let alpha = DetectionLabelStyle.alpha(confidence: confidence)
     boundingBoxViews[index].show(

@@ -9,6 +9,7 @@ Run on a GPU computer / Colab, not a Codemagic iOS packaging build worker:
 
 Prerequisite: pip install 'ultralytics>=8.4.142,<9' pyyaml
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,7 +36,7 @@ def validate_joint_dataset(dataset: Path, standard_classes: list[str]) -> dict:
     if not isinstance(meta, dict):
         raise SystemExit("Invalid YOLO dataset YAML")
     names = parse_names(meta.get("names"))
-    expected = standard_classes + ["drone"]
+    expected = [*standard_classes, "drone"]
     if names != expected or meta.get("nc", 81) != 81:
         raise SystemExit("Classes must be the exact 80 COCO ids in order + drone id 80.")
     for key in ("train", "val"):
@@ -54,7 +55,9 @@ def main():
     parser.add_argument("--device", default="0")
     parser.add_argument("--project", default="runs/yolo26-81")
     parser.add_argument("--resume", type=Path, help="Resume an interrupted run from its last.pt")
-    parser.add_argument("--coco-val-data", type=Path, help="Optional ORIGINAL COCO-80 val data.yaml for retention check")
+    parser.add_argument(
+        "--coco-val-data", type=Path, help="Optional ORIGINAL COCO-80 val data.yaml for retention check"
+    )
     parser.add_argument("--max-coco-map-drop", type=float, default=0.03)
     args = parser.parse_args()
 
@@ -89,13 +92,16 @@ def main():
         raise SystemExit("No fine-tuned checkpoint was generated.")
     trained = YOLO(str(best))
     names = [str(trained.names[i]) for i in range(81)]
-    if names != reference_names + ["drone"]:
+    if names != [*reference_names, "drone"]:
         raise SystemExit("Fine-tuned model lost the required 81-class mapping.")
 
     # Same merged val split tests class-80 drone AND remaining 80 classes.
     scores = trained.val(
         data=str(args.data.expanduser().resolve()),
-        imgsz=args.imgsz, device=args.device, split="val", plots=True,
+        imgsz=args.imgsz,
+        device=args.device,
+        split="val",
+        plots=True,
     )
     class_maps = getattr(scores.box, "maps", [])
     drone_map5095 = float(class_maps[80]) if len(class_maps) == 81 else None
@@ -121,7 +127,9 @@ def main():
         reference = YOLO("yolo26n.pt")
         original_eval = reference.val(data=str(original_yaml), device=args.device, imgsz=args.imgsz, split="val")
         joint_eval = trained.val(data=str(joint_yaml), device=args.device, imgsz=args.imgsz, split="val")
-        if set(original_eval.box.ap_class_index) != set(range(80)) or set(joint_eval.box.ap_class_index) != set(range(80)):
+        if set(original_eval.box.ap_class_index) != set(range(80)) or set(joint_eval.box.ap_class_index) != set(
+            range(80)
+        ):
             raise SystemExit("Retention evaluation requires ground truth for all 80 COCO classes.")
         baseline_map = float(sum(original_eval.box.maps[:80]) / 80)
         trained_map = float(sum(joint_eval.box.maps[:80]) / 80)
@@ -141,8 +149,11 @@ def main():
 
     digest = hashlib.sha256(best.read_bytes()).hexdigest()
     manifest = {
-        "model": "yolo26n.pt", "classes": names, "drone_class_id": 80,
-        "data": str(args.data.resolve()), "image_size": args.imgsz,
+        "model": "yolo26n.pt",
+        "classes": names,
+        "drone_class_id": 80,
+        "data": str(args.data.resolve()),
+        "image_size": args.imgsz,
         "epochs_requested": args.epochs,
         "validation_map50_81": float(scores.box.map50),
         "validation_drone_map5095": drone_map5095,

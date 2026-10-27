@@ -17,10 +17,10 @@ Small smoke-test (ONLY first train batch + test, NOT full training):
 Source: https://huggingface.co/datasets/lgrzybowski/seraphim-drone-detection-dataset
 Claimed license: CC BY 4.0. Verify underlying sources' license and give credit.
 """
+
 from __future__ import annotations
 
 import argparse
-import os
 import stat
 import zipfile
 from pathlib import Path

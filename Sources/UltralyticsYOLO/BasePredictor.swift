@@ -43,6 +43,9 @@ public class BasePredictor: Predictor, @unchecked Sendable {
   /// The class labels used by the model for categorizing detections.
   public var labels = [String]()
 
+  /// Explicit schema for the aerial export's same-anchor drone/bird/airplane scores.
+  var hasAerialClassScores = false
+
   /// Whether camera predictions should include a copy of the original input image in `YOLOResult`.
   public var capturesOriginalImage = false
 
@@ -285,9 +288,14 @@ public class BasePredictor: Predictor, @unchecked Sendable {
 
         // (2) Extract class labels
         predictor.labels = userDefined.map(Self.parseLabels(from:)) ?? []
+        predictor.hasAerialClassScores =
+          userDefined?["aerial_score_schema"] == "xyxy_conf_class_drone_bird_airplane_v1"
+          && predictor.labels == ["drone", "bird", "airplane"]
 
         // Detect NMS-free models (YOLO26 support)
-        if let nmsValue = userDefined?["nms"] {
+        if predictor.hasAerialClassScores {
+          predictor.requiresNMS = false
+        } else if let nmsValue = userDefined?["nms"] {
           predictor.requiresNMS = (nmsValue.lowercased() != "false")
         } else if Self.hasNMSFreeDetectionOutput(in: mlModel) {
           predictor.requiresNMS = false

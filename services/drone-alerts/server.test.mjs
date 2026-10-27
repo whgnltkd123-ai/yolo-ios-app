@@ -25,7 +25,7 @@ async function fixture(t, push) {
     assert.equal(result.status, 201);
     return { code, ...result.data };
   };
-  const event = () => ({ eventID: randomUUID(), score: 0.75, observedAt: clock / 1000 });
+  const event = () => ({ eventID: randomUUID(), score: 0.60, observedAt: clock / 1000 });
   return { db, sent, request, enroll, event, advance: (ms) => { clock += ms; } };
 }
 
@@ -56,7 +56,7 @@ test("single-use invites, hashed credentials, role and channel boundaries", asyn
 test("reject stale, low-score, malformed and oversized events without a push", async (t) => {
   const f = await fixture(t), pub = await f.enroll("team", "publisher");
   for (const event of [
-    { ...f.event(), score: 0.69 }, { ...f.event(), score: 2 },
+    { ...f.event(), score: 0.59 }, { ...f.event(), score: 2 },
     { ...f.event(), observedAt: 0 }, { ...f.event(), eventID: "invalid" }
   ]) assert.equal((await f.request("events", "POST", pub.token, event)).status, 400);
   assert.equal((await f.request("events", "POST", pub.token, { extra: "x".repeat(10000) })).status, 413);

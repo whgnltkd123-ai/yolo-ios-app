@@ -12,6 +12,7 @@ Example:
 Outputs a JSON summary of thresholded frame-level detection and false alarm
 rates. Supply real, independently-recorded footage before making claims.
 """
+
 import argparse
 import json
 from pathlib import Path
@@ -73,7 +74,7 @@ def main():
     if not (0.05 <= args.confidence <= 1.0):
         p.error("--confidence must be between 0.05 and 1.0")
     if not any([args.bird, args.drone, args.empty]):
-        p.error("Provide at least one labelled bird, drone, or empty video")
+        p.error("Provide at least one labeled bird, drone, or empty video")
 
     model = YOLO(str(args.model))
     labels = {str(x).lower() for x in model.names.values()}

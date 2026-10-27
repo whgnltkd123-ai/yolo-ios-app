@@ -11,6 +11,7 @@ would NOT add drone recognition. Third-party PyTorch files can execute arbitrary
 code during deserialization: use only your own trusted checkpoint on an isolated
 Codemagic build host without credentials/secrets.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -26,6 +27,27 @@ import certifi
 from ultralytics import YOLO
 
 DEST = Path("YOLOiOSApp/Models/Detect/yolo26n-aerial3.mlpackage")
+SCORE_SCHEMA = "xyxy_conf_class_drone_bird_airplane_v1"
+
+
+def retain_aerial_class_scores(model):
+    """Keep original one2one TopK selection and attach its same-anchor class vector."""
+    from types import MethodType
+
+    from ultralytics.nn.modules.head import Detect
+
+    head = model.model[-1]
+    if type(head) is not Detect or head.nc != 3 or getattr(head, "one2one_cv2", None) is None:
+        raise RuntimeError("Expected the trained three-class YOLO26 one2one detection head")
+    head.postprocess = MethodType(aerial_postprocess, head)
+
+
+def aerial_postprocess(head, predictions):
+    import torch
+
+    boxes, class_scores = predictions.split((4, 3), dim=-1)
+    score, label, anchor = head.get_topk_index(class_scores, head.max_det)
+    return torch.cat((head._gather(boxes, anchor), score, label, head._gather(class_scores, anchor)), dim=-1)
 
 
 def download_verified_weights() -> Path:
@@ -88,9 +110,12 @@ def verify_coreml_export(weights: Path, export_path: Path, imgsz: int) -> dict:
     torch.set_num_threads(4)
     reference = YOLO(str(weights)).model.cpu().float().eval()
     reference.end2end = True  # Match the exporter's explicit nms=False branch.
+    retain_aerial_class_scores(reference)
     converted = ct.models.MLModel(str(export_path), compute_units=ct.ComputeUnit.CPU_ONLY)
     source_sha = hashlib.sha256(weights.read_bytes()).hexdigest()
     converted.user_defined_metadata["checkpoint_sha256"] = source_sha
+    converted.user_defined_metadata["aerial_score_schema"] = SCORE_SCHEMA
+    converted.user_defined_metadata["nms"] = "False"
     spec = converted.get_spec()
     if len(spec.description.output) != 1:
         raise RuntimeError("Expected one end-to-end detection tensor")
@@ -107,34 +132,50 @@ def verify_coreml_export(weights: Path, export_path: Path, imgsz: int) -> dict:
             raw = reference(tensor)
         expected = (raw[0] if isinstance(raw, tuple) else raw).detach().numpy()[0]
         actual = np.asarray(converted.predict({"image": Image.fromarray(rgb)})[output_name])[0]
-        if expected.shape != actual.shape or expected.shape != (300, 6):
+        if expected.shape != actual.shape or expected.shape != (300, 9):
             raise RuntimeError(f"Unexpected detection shape: {expected.shape}, {actual.shape}")
         if not np.isfinite(actual).all():
             raise RuntimeError("Non-finite Core ML output")
         # End-to-end TopK can reorder near-tied rows; compare scores by rank and
         # match confident boxes in both directions instead of assuming row IDs.
-        np.testing.assert_allclose(np.sort(expected[:, 4]), np.sort(actual[:, 4]), atol=.01, rtol=.05)
+        np.testing.assert_allclose(np.sort(expected[:, 4]), np.sort(actual[:, 4]), atol=0.01, rtol=0.05)
         max_box_delta = 0.0
         max_score_delta = 0.0
         for left, right in ((expected, actual), (actual, expected)):
             used = set()
-            for row in left[left[:, 4] >= .30]:
-                candidates = [(float(np.max(np.abs(row[:4] - r[:4]))), i)
-                              for i, r in enumerate(right)
-                              if i not in used and round(float(row[5])) == round(float(r[5]))]
+            for row in left[left[:, 4] >= 0.30]:
+                candidates = [
+                    (float(np.max(np.abs(row[:4] - r[:4]))), i)
+                    for i, r in enumerate(right)
+                    if i not in used and round(float(row[5])) == round(float(r[5]))
+                ]
                 delta, index = min(candidates, default=(float("inf"), -1))
-                if index < 0 or delta > 4.0 or abs(float(row[4] - right[index, 4])) > .02:
+                if index < 0 or delta > 4.0 or abs(float(row[4] - right[index, 4])) > 0.02:
                     raise RuntimeError(f"Core ML conversion mismatch: {fixture.name}")
+                np.testing.assert_allclose(row[6:9], right[index, 6:9], atol=0.02, rtol=0.05)
                 used.add(index)
                 max_box_delta = max(max_box_delta, delta)
                 max_score_delta = max(max_score_delta, abs(float(row[4] - right[index, 4])))
-        checks.append({"image": fixture.name, "image_sha256": hashlib.sha256(fixture.read_bytes()).hexdigest(),
-                       "pytorch_above_030": int((expected[:, 4] >= .30).sum()),
-                       "coreml_above_030": int((actual[:, 4] >= .30).sum()),
-                       "max_box_delta_pixels": max_box_delta, "max_score_delta": max_score_delta})
-    report = {"checkpoint_sha256": source_sha, "classes": ["drone", "bird", "airplane"],
-              "input_size": imgsz, "conversion_smoke_passed": True, "checks": checks,
-              "limitations": "Three public frames only; not an accuracy gate or iPhone camera/device validation."}
+        checks.append(
+            {
+                "image": fixture.name,
+                "image_sha256": hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                "pytorch_above_030": int((expected[:, 4] >= 0.30).sum()),
+                "coreml_above_030": int((actual[:, 4] >= 0.30).sum()),
+                "max_box_delta_pixels": max_box_delta,
+                "max_score_delta": max_score_delta,
+            }
+        )
+    report = {
+        "checkpoint_sha256": source_sha,
+        "classes": ["drone", "bird", "airplane"],
+        "input_size": imgsz,
+        "conversion_smoke_passed": True,
+        "aerial_score_schema": SCORE_SCHEMA,
+        "comparison": "one2one TopK with unfiltered same-anchor scores, not other overlapping boxes",
+        "checks": checks,
+        "limitations": "Three public frames only; not an accuracy gate or iPhone camera/device validation.",
+    }
     Path("build").mkdir(exist_ok=True)
     Path("build/coreml-conversion-check.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     converted.save(str(DEST))
@@ -155,15 +196,14 @@ def main():
     args = ckpt.get("train_args", {}) if isinstance(ckpt, dict) else {}
     starting_model = str(args.get("model", ""))
     if starting_model and not (
-        "yolo26" in starting_model.lower()
-        or starting_model.endswith("yolo26-drone.pt")
-        or starting_model.endswith("nano-bird-drone.pt")
+        "yolo26" in starting_model.lower() or starting_model.endswith(("yolo26-drone.pt", "nano-bird-drone.pt"))
     ):
         print("WARNING: checkpoint training arguments do not prove a YOLO26n lineage:", starting_model)
     imgsz = int(os.environ.get("YOLO26_DRONE_IMGSZ", "640"))
     if imgsz not in (416, 512, 640):
         raise SystemExit("YOLO26_DRONE_IMGSZ must be 416, 512, or 640.")
     print("Exporting trained detection checkpoint as end-to-end Core ML at", imgsz)
+    retain_aerial_class_scores(model.model)
     export_path = Path(str(model.export(format="coreml", imgsz=imgsz, nms=False, device="cpu")))
     if not export_path.is_dir() or export_path.suffix != ".mlpackage":
         raise SystemExit(f"Core ML export failed: {export_path}")
