@@ -113,7 +113,7 @@ workflows:
       xcode: latest
       vars:
         YOLO26_DRONE_CHECKPOINT_PATH: checkpoints/aerial-three/best.pt
-        YOLO26_DRONE_CHECKPOINT_SHA256: "96c48c83c0ac6210187d4cfadf05dfb0ef337de91e8a368cbde81f82bbb07b03"
+        YOLO26_DRONE_CHECKPOINT_SHA256: "f1701e53e9952b9cfc3726fb118d3f718de2908973a5021dff90731db1b23b0e"
     scripts:
       - name: Verify trained YOLO26 checkpoint and convert to Core ML
         script: |
