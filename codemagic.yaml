@@ -147,7 +147,7 @@ workflows:
           xcodebuild -scheme UltralyticsYOLO -sdk iphonesimulator \
             -destination "platform=iOS Simulator,id=$IOS_SIMULATOR,arch=arm64" \
             -derivedDataPath "$CM_BUILD_DIR/build/TrackerTests" \
-            -only-testing:YOLOTests/AerialTrackerTests \
+            -only-testing:YOLOTests/AerialDecisionTests \
             IPHONEOS_DEPLOYMENT_TARGET=16.0 test
       - name: Produce unsigned YOLO26 drone alert IPA for Windows Sideloadly
         script: |
