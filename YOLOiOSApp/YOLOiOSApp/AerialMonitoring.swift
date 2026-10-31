@@ -3,53 +3,6 @@ import Foundation
 import UIKit
 import UltralyticsYOLO
 
-/// App-only presentation and local evidence storage; detection/tracking remain in the SDK.
-final class AerialTrackOverlay: UIView {
-  var tracks: [AerialTrack] = [] { didSet { setNeedsDisplay() } }
-  var imageSize = CGSize.zero
-  var showsTrackIDs = true { didSet { setNeedsDisplay() } }
-
-  override func draw(_ rect: CGRect) {
-    guard let context = UIGraphicsGetCurrentContext() else { return }
-    for track in tracks where showsTrackIDs || track.observed {
-      let color = track.observed ? Self.color(track.classification) : UIColor.lightGray
-      let frame = aspectFillDisplayRect(for: track.box, imageSize: imageSize, viewSize: bounds.size)
-      context.setStrokeColor(color.cgColor)
-      context.setLineWidth(2)
-      context.setLineDash(phase: 0, lengths: track.observed ? [] : [5, 4])
-      context.stroke(frame)
-      context.beginPath()
-      for (index, point) in (showsTrackIDs ? track.trail : []).enumerated() {
-        let mapped = aspectFillDisplayRect(
-          for: CGRect(origin: point, size: .zero),
-          imageSize: imageSize, viewSize: bounds.size
-        ).origin
-        if index == 0 { context.move(to: mapped) } else { context.addLine(to: mapped) }
-      }
-      context.strokePath()
-      let text =
-        track.observed
-        ? "\(showsTrackIDs ? "#\(track.id) " : "")\(track.displayLabel) \(Int(track.score * 100))점"
-        : "#\(track.id) 추적 끊김"
-      (text as NSString).draw(
-        at: CGPoint(x: max(0, frame.minX), y: max(0, frame.minY - 22)),
-        withAttributes: [
-          .font: UIFont.systemFont(ofSize: 14, weight: .semibold),
-          .foregroundColor: color, .backgroundColor: UIColor.black.withAlphaComponent(0.7),
-        ])
-    }
-  }
-
-  nonisolated static func color(_ label: String) -> UIColor {
-    switch label {
-    case "드론": return .systemRed
-    case "새": return .systemGreen
-    case "비행기": return .systemBlue
-    default: return .systemYellow
-    }
-  }
-}
-
 final class AerialEvidenceStore {
   private let queue = DispatchQueue(label: "aerial.evidence", qos: .utility)
   private var busy = false
@@ -109,12 +62,12 @@ final class AerialEvidenceStore {
 
   /// Call on main. A source frame and metadata from the same inference are kept together.
   func record(
-    result: YOLOResult, tracks: [AerialTrack], model: String,
+    result: YOLOResult, model: String,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
     let now = CACurrentMediaTime()
-    let eligible = tracks.filter { $0.observed && $0.samples >= 3 }
-    let keys = eligible.map { "\($0.id):\($0.classification)" }
+    let eligible = result.boxes.filter { $0.aerialDisplayLabel != nil && $0.conf >= 0.30 }
+    let keys = eligible.compactMap(\.aerialDisplayLabel)
     guard !busy, now - lastAnySave >= 5, let image = result.originalImage,
       !eligible.isEmpty, keys.contains(where: { now - (lastSave[$0] ?? -.infinity) >= 30 })
     else { return }
@@ -123,11 +76,11 @@ final class AerialEvidenceStore {
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let objects: [[String: Any]] = eligible.map {
       [
-        "trackID": $0.id, "displayClass": $0.classification, "suspicion": $0.suspicion ?? "",
-        "modelClass": $0.label,
+        "displayClass": $0.aerialDisplayLabel ?? "미확인 물체",
+        "modelClass": $0.cls,
         "classScores": $0.classScores ?? [:],
-        "score": $0.score,
-        "normalizedBox": [$0.box.minX, $0.box.minY, $0.box.width, $0.box.height],
+        "score": $0.conf,
+        "normalizedBox": [$0.xywhn.minX, $0.xywhn.minY, $0.xywhn.width, $0.xywhn.height],
       ]
     }
     queue.async { [self] in
@@ -166,16 +119,16 @@ final class AerialEvidenceStore {
         let annotated = UIGraphicsImageRenderer(size: image.size, format: format).image {
           renderer in
           image.draw(at: .zero)
-          for track in eligible {
+          for detection in eligible {
             let box = CGRect(
-              x: track.box.minX * image.size.width, y: track.box.minY * image.size.height,
-              width: track.box.width * image.size.width,
-              height: track.box.height * image.size.height)
+              x: detection.xywhn.minX * image.size.width, y: detection.xywhn.minY * image.size.height,
+              width: detection.xywhn.width * image.size.width,
+              height: detection.xywhn.height * image.size.height)
             renderer.cgContext.setStrokeColor(
-              AerialTrackOverlay.color(track.classification).cgColor)
+              UIColor.systemYellow.cgColor)
             renderer.cgContext.setLineWidth(3)
             renderer.cgContext.stroke(box)
-            let text = "#\(track.id) \(track.displayLabel) \(Int(track.score * 100))점"
+            let text = "\(detection.aerialDisplayLabel ?? detection.cls) \(Int(detection.conf * 100))점"
             (text as NSString).draw(
               at: CGPoint(x: box.minX, y: max(0, box.minY - 26)),
               withAttributes: [

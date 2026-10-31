@@ -99,6 +99,33 @@ public struct Box: @unchecked Sendable {
   /// Unfiltered class scores for this exact detection anchor, when the export supplies them.
   /// Missing scores are not zero and cannot establish a drone-versus-bird margin.
   public var classScores: [String: Float]? = nil
+
+  /// Single-frame display decision, not a calibrated probability or tracked identity.
+  /// Missing competitor scores must never be interpreted as zero.
+  public var aerialDisplayLabel: String? {
+    let category = cls.lowercased()
+    guard ["drone", "uav", "bird", "birds", "airplane", "aeroplane", "plane"].contains(category)
+    else { return nil }
+    guard conf.isFinite, (0...1).contains(conf) else { return "미확인 물체" }
+    if ["airplane", "aeroplane", "plane"].contains(category) {
+      return conf >= 0.60 ? "비행기" : "미확인 물체"
+    }
+    guard let scores = classScores,
+      let drone = scores["drone"], let bird = scores["bird"],
+      drone.isFinite, bird.isFinite, (0...1).contains(drone), (0...1).contains(bird)
+    else { return "미확인 물체" }
+    let isDrone = category == "drone" || category == "uav"
+    let selected = isDrone ? drone : bird
+    let competing = isDrone ? bird : drone
+    guard abs(selected - conf) < 0.02, selected >= 0.30,
+      selected - competing > 0.20 + 0.000001
+    else { return "미확인 물체" }
+    if let plane = scores["airplane"], !plane.isFinite || selected - plane <= 0.20 + 0.000001 {
+      return "미확인 물체"
+    }
+    if selected >= 0.60 { return isDrone ? "드론" : "새" }
+    return isDrone ? "드론 의심" : "새 의심"
+  }
 }
 
 /// Instance-segmentation mask data from a YOLO segmentation model.

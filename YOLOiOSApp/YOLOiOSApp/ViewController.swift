@@ -131,126 +131,6 @@ private final class DroneAlertSoundPlayer {
   }
 }
 
-/// Experimental silhouette periodicity, not a bird classifier.
-/// Only uniform-background, resolved targets can provide evidence; missing evidence proves nothing.
-private struct WingMotionEvidence {
-  private var samples: [(time: Double, shape: Double)] = []
-  private var previousBox: CGRect?
-  private var evidenceUntil = 0.0
-  private var lockedSide: CGFloat?
-
-  mutating func reset() {
-    samples.removeAll(keepingCapacity: true)
-    previousBox = nil
-    evidenceUntil = 0
-    lockedSide = nil
-  }
-
-  mutating func update(image: UIImage?, box: CGRect, time: Double) -> Bool {
-    if let last = samples.last, time - last.time < 0.045 { return time < evidenceUntil }
-    guard let image, image.imageOrientation == .up, let source = image.cgImage,
-      box.width * CGFloat(source.width) >= 24, box.height * CGFloat(source.height) >= 24
-    else {
-      reset()
-      return false
-    }
-    if let previousBox {
-      let shift = hypot(box.midX - previousBox.midX, box.midY - previousBox.midY)
-      let scale = box.width * box.height / max(previousBox.width * previousBox.height, 0.000001)
-      if shift > max(box.width, box.height) * 0.3 || !(0.6...1.67).contains(scale)
-        || time - (samples.last?.time ?? time) > 0.12
-      {
-        reset()
-      }
-    }
-    let width = CGFloat(source.width)
-    let height = CGFloat(source.height)
-    let extent = max(box.width * width, box.height * height)
-    if let lockedSide, extent > lockedSide / 1.2 { reset() }
-    if lockedSide == nil { lockedSide = extent * 1.6 }
-    previousBox = box
-    guard let side = lockedSide else { return false }
-    let rect = CGRect(
-      x: box.midX * width - side / 2, y: box.midY * height - side / 2,
-      width: side, height: side
-    ).integral
-    guard CGRect(x: 0, y: 0, width: width, height: height).contains(rect),
-      let crop = source.cropping(to: rect)
-    else {
-      reset()
-      return false
-    }
-    var pixels = [UInt8](repeating: 0, count: 32 * 32)
-    let rendered = pixels.withUnsafeMutableBytes { bytes -> Bool in
-      guard
-        let context = CGContext(
-          data: bytes.baseAddress, width: 32, height: 32, bitsPerComponent: 8,
-          bytesPerRow: 32, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: 0)
-      else { return false }
-      context.draw(crop, in: CGRect(x: 0, y: 0, width: 32, height: 32))
-      return true
-    }
-    guard rendered else {
-      reset()
-      return false
-    }
-    let border = (0..<1024).filter { $0 / 32 < 2 || $0 / 32 > 29 || $0 % 32 < 2 || $0 % 32 > 29 }
-      .map { Double(pixels[$0]) }
-    let background = border.reduce(0, +) / Double(border.count)
-    let variance = border.reduce(0) { $0 + pow($1 - background, 2) } / Double(border.count)
-    guard variance < 144 else {
-      reset()
-      return false
-    }
-    let foreground = (0..<1024).filter { abs(Double(pixels[$0]) - background) > 35 }
-    guard (20...500).contains(foreground.count) else {
-      reset()
-      return false
-    }
-    let count = Double(foreground.count)
-    let cx = foreground.reduce(0.0) { $0 + Double($1 % 32) } / count
-    let cy = foreground.reduce(0.0) { $0 + Double($1 / 32) } / count
-    guard (10...22).contains(cx), (10...22).contains(cy) else {
-      reset()
-      return false
-    }
-    let xx = foreground.reduce(0.0) { $0 + pow(Double($1 % 32) - cx, 2) }
-    let yy = foreground.reduce(0.0) { $0 + pow(Double($1 / 32) - cy, 2) }
-    samples.append((time, yy / max(xx + yy, 1)))
-    if samples.count > 64 { samples.removeFirst() }
-    guard samples.count >= 48, let first = samples.first, let last = samples.last else {
-      return false
-    }
-    let dt = (last.time - first.time) / Double(samples.count - 1)
-    guard dt > 0,
-      zip(samples.dropFirst(), samples).allSatisfy({
-        let gap = $0.0.time - $0.1.time
-        return gap > dt * 0.5 && gap < dt * 1.5
-      })
-    else { return false }
-    let mean = samples.reduce(0.0) { $0 + $1.shape } / Double(samples.count)
-    let values = samples.map { $0.shape - mean }
-    guard values.reduce(0, { $0 + $1 * $1 }) / Double(values.count) > 0.0025 else { return false }
-    // At least three cycles, four samples per cycle, and alternating shape changes.
-    for lag in 4...(values.count / 3) {
-      let frequency = 1 / (Double(lag) * dt)
-      guard (1.5...6).contains(frequency) else { continue }
-      func correlation(_ offset: Int) -> Double {
-        let pairs = zip(values.dropFirst(offset), values.dropLast(offset))
-        let numerator = pairs.reduce(0.0) { $0 + $1.0 * $1.1 }
-        let energyA = values.dropFirst(offset).reduce(0.0) { $0 + $1 * $1 }
-        let energyB = values.dropLast(offset).reduce(0.0) { $0 + $1 * $1 }
-        return numerator / max(sqrt(energyA * energyB), 0.000001)
-      }
-      if correlation(lag) > 0.75 && correlation(lag / 2) < -0.35 {
-        evidenceUntil = time + 0.5
-        return true
-      }
-    }
-    return time < evidenceUntil
-  }
-}
-
 /// The main view controller for the YOLO iOS application, handling model selection and visualization.
 class ViewController: UIViewController, YOLOViewDelegate {
 
@@ -285,7 +165,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
   // MARK: - Stable bird/drone warning levels (experimental model estimates, not identity proof)
   private enum DroneAlertStage: Int, Hashable {
     case none = 0
-    case unknown = 1
     case high = 3
   }
 
@@ -297,29 +176,11 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var previousAlertStage: DroneAlertStage = .none
   private let monitoringButton = UIButton(type: .system)
   private let monitoringStatusLabel = UILabel()
-  private let trackingOverlay = AerialTrackOverlay()
-  private var tracker = AerialTracker()
-  private var trackingContext = ""
-  private var trackWingEvidence: [Int: WingMotionEvidence] = [:]
-  private var featureTracks: [AerialTrack] = []
   private let evidenceStore = AerialEvidenceStore()
-  private var trackingEnabled = UserDefaults.standard.bool(forKey: "aerial.tracking")
   private var evidenceEnabled = UserDefaults.standard.bool(forKey: "aerial.evidence")
-  // Sending to others always starts off for each app launch.
   private var broadcastEnabled = false
-  private var resultsExpiry: DispatchWorkItem?
-  private var aerialDecisionEnabled = false
-  private var usesFeatureTracking: Bool {
-    aerialDecisionEnabled || trackingEnabled || evidenceEnabled || broadcastEnabled
-  }
 
   private func installDroneAlertControls() {
-    trackingOverlay.backgroundColor = .clear
-    trackingOverlay.isUserInteractionEnabled = false
-    trackingOverlay.frame = yoloView.bounds
-    trackingOverlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    trackingOverlay.isHidden = !trackingEnabled
-    yoloView.addSubview(trackingOverlay)
     let panel = UIStackView(arrangedSubviews: [
       aerialBoxesButton, droneAlertButton,
       monitoringButton, droneAlertStatusLabel, monitoringStatusLabel,
@@ -352,7 +213,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     droneAlertStatusLabel.layer.cornerRadius = 6
     droneAlertStatusLabel.clipsToBounds = true
     droneAlertStatusLabel.numberOfLines = 2
-    monitoringButton.setTitle("추적 · 채증 · 가입자 알림", for: .normal)
+    monitoringButton.setTitle("채증 · 가입자 알림", for: .normal)
     monitoringButton.setTitleColor(.white, for: .normal)
     monitoringButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
     monitoringButton.backgroundColor = UIColor.black.withAlphaComponent(0.76)
@@ -367,7 +228,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
       self?.monitoringStatusLabel.text = text
     }
     NotificationCenter.default.addObserver(
-      self, selector: #selector(clearFeatureTracking),
+      self, selector: #selector(clearAerialAlerts),
       name: UIApplication.willResignActiveNotification, object: nil)
     applyMonitoringSettings()
 
@@ -414,29 +275,18 @@ class ViewController: UIViewController, YOLOViewDelegate {
   }
 
   private func applyMonitoringSettings() {
-    yoloView.capturesOriginalImage = droneAlertEnabled || usesFeatureTracking
-    yoloView.showOverlays = !(usesFeatureTracking && currentTask == "Detect")
-    trackingOverlay.isHidden = !usesFeatureTracking || currentTask != "Detect"
-    monitoringStatusLabel.text =
-      "추적 \(trackingEnabled ? "ON" : "OFF") · 자동 채증 \(evidenceEnabled ? "ON" : "OFF") · 전송 \(broadcastEnabled ? "ON" : "OFF")"
-    UserDefaults.standard.set(trackingEnabled, forKey: "aerial.tracking")
+    // Only opt-in evidence capture requires a full-resolution frame copy.
+    yoloView.capturesOriginalImage = evidenceEnabled
     UserDefaults.standard.set(evidenceEnabled, forKey: "aerial.evidence")
-    if !usesFeatureTracking { clearFeatureTracking() }
+    monitoringStatusLabel.text = "자동 채증 \(evidenceEnabled ? "ON" : "OFF") · 전송 \(broadcastEnabled ? "ON" : "OFF")"
   }
 
   @objc private func showMonitoringSettings() {
     let menu = UIAlertController(
-      title: "추적 · 채증 · 가입자 알림",
+      title: "채증 · 가입자 알림",
       message:
         "자동 채증은 앱 내 갤러리에만 보관합니다(최대 500MB). 사진 앱에는 선택한 자료만 저장할 수 있습니다. 가입자에게는 사진·위치 없이 드론 식별 알림만 전송합니다.\n\(RemoteDroneAlerts.shared.status)",
       preferredStyle: .actionSheet)
-    menu.addAction(
-      UIAlertAction(title: trackingEnabled ? "추적 끄기" : "추적 켜기", style: .default) { [weak self] _ in
-        guard let self else { return }
-        trackingEnabled.toggle()
-        clearFeatureTracking()
-        applyMonitoringSettings()
-      })
     menu.addAction(
       UIAlertAction(title: evidenceEnabled ? "자동 채증 끄기" : "자동 채증 켜기", style: .default) {
         [weak self] _ in
@@ -514,79 +364,20 @@ class ViewController: UIViewController, YOLOViewDelegate {
   }
 
   private func showMonitoringMessage(_ text: String) {
-    let alert = UIAlertController(title: "추적 · 채증 · 알림", message: text, preferredStyle: .alert)
+    let alert = UIAlertController(title: "채증 · 알림", message: text, preferredStyle: .alert)
     alert.addAction(UIAlertAction(title: "확인", style: .default))
     present(alert, animated: true)
   }
 
-  @objc private func clearFeatureTracking() {
-    resultsExpiry?.cancel()
-    resultsExpiry = nil
-    tracker.reset()
-    featureTracks.removeAll()
-    trackWingEvidence.removeAll()
-    trackingOverlay.tracks = []
+  @objc private func clearAerialAlerts() {
     resetDroneCandidate()
   }
 
   private func processAerialFeatures(result: YOLOResult) {
-    aerialDecisionEnabled =
-      result.names.contains(where: isBirdClass) && result.names.contains(where: isDroneClass)
-    yoloView.capturesOriginalImage = droneAlertEnabled || usesFeatureTracking
-    applyOverlayVisibility()
-    guard usesFeatureTracking, currentTask == "Detect",
-      UIApplication.shared.applicationState == .active,
-      presentedViewController == nil, viewIfLoaded?.window != nil
-    else {
-      if !featureTracks.isEmpty { clearFeatureTracking() }
-      return
-    }
-    let context = "\(yoloView.trackingCameraContext):\(result.orig_shape):\(yoloView.bounds.size)"
-    if context != trackingContext {
-      clearFeatureTracking()
-      trackingContext = context
-    }
-    let now = CACurrentMediaTime()
-    featureTracks = tracker.update(boxes: result.boxes, time: now)
-    let ids = Set(featureTracks.map(\.id))
-    trackWingEvidence = trackWingEvidence.filter { ids.contains($0.key) }
-    // Bound image processing on the UI thread. Unmeasured motion is never positive evidence.
-    let motionIDs = Set(
-      featureTracks.filter { $0.observed && $0.label == "drone" && $0.score >= 0.60 }
-        .sorted { $0.score > $1.score }.prefix(4).map(\.id))
-    for index in featureTracks.indices {
-      let track = featureTracks[index]
-      guard track.observed else {
-        trackWingEvidence[track.id] = nil
-        continue
-      }
-      var motion = trackWingEvidence[track.id] ?? WingMotionEvidence()
-      let wingMotion: Bool
-      if motionIDs.contains(track.id) {
-        wingMotion = motion.update(image: result.originalImage, box: track.box, time: now)
-      } else {
-        motion.reset()
-        wingMotion = false
-      }
-      let contradictory = result.boxes.contains {
-        AerialTracker.category($0.cls) != nil && AerialTracker.category($0.cls) != track.label
-          && $0.conf >= 0.60 && $0.conf >= track.score * 0.75 && overlaps($0.xywhn, track.box)
-      }
-      let suppressed = contradictory || (track.label == "drone" && wingMotion)
-      featureTracks[index].identificationSuppressed = suppressed
-      if suppressed { tracker.suppressIdentification(for: track.id) }
-      trackWingEvidence[track.id] = motion
-    }
-    trackingOverlay.imageSize = result.orig_shape
-    trackingOverlay.showsTrackIDs = trackingEnabled
-    trackingOverlay.tracks = usesFeatureTracking ? featureTracks : []
-    resultsExpiry?.cancel()
-    let expiry = DispatchWorkItem { [weak self] in self?.clearFeatureTracking() }
-    resultsExpiry = expiry
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: expiry)
+    guard currentTask == "Detect", UIApplication.shared.applicationState == .active,
+      presentedViewController == nil, viewIfLoaded?.window != nil else { return }
     if evidenceEnabled {
-      evidenceStore.record(result: result, tracks: featureTracks, model: currentModelName) {
-        [weak self] outcome in
+      evidenceStore.record(result: result, model: currentModelName) { [weak self] outcome in
         switch outcome {
         case .success: self?.monitoringStatusLabel.text = "채증 완료 · 앱 내 갤러리에 보관"
         case .failure(let error):
@@ -596,34 +387,17 @@ class ViewController: UIViewController, YOLOViewDelegate {
         }
       }
     }
-    if broadcastEnabled, result.names.contains(where: isBirdClass),
-      result.names.contains(where: isDroneClass)
-    {
-      for track in featureTracks where track.classification == "드론" {
-        RemoteDroneAlerts.shared.publish(trackID: track.id, score: track.score)
-      }
+    if broadcastEnabled, let drone = result.boxes.first(where: { $0.aerialDisplayLabel == "드론" }) {
+      RemoteDroneAlerts.shared.publish(score: drone.conf)
     }
   }
 
-  private func applyOverlayVisibility() {
-    let overlays = !(usesFeatureTracking && currentTask == "Detect")
-    if yoloView.showOverlays != overlays { yoloView.showOverlays = overlays }
-    trackingOverlay.isHidden = !usesFeatureTracking || currentTask != "Detect"
-  }
-
   private func isBirdClass(_ value: String) -> Bool {
-    AerialTracker.category(value) == "bird"
+    ["bird", "birds"].contains(value.lowercased())
   }
 
   private func isDroneClass(_ value: String) -> Bool {
-    AerialTracker.category(value) == "drone"
-  }
-
-  private func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
-    let intersection = a.intersection(b)
-    guard !intersection.isNull else { return false }
-    let union = a.width * a.height + b.width * b.height - intersection.width * intersection.height
-    return union > 0 && (intersection.width * intersection.height / union) >= 0.25
+    ["drone", "uav", "drones"].contains(value.lowercased())
   }
 
   private func soundForStableStage(_ stage: DroneAlertStage) {
@@ -631,8 +405,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
     droneAlertAudio.play(stage: stage.rawValue)
     guard stage != previousAlertStage else { return }
     switch stage {
-    case .unknown:
-      UIImpactFeedbackGenerator(style: .light).impactOccurred()
     case .high:
       UINotificationFeedbackGenerator().notificationOccurred(.error)
       AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
@@ -654,23 +426,19 @@ class ViewController: UIViewController, YOLOViewDelegate {
       return
     }
 
-    // Both classes are required before any drone warning, including tracked warnings.
+    // A generic COCO model cannot issue drone alerts.
     guard result.names.contains(where: isBirdClass), result.names.contains(where: isDroneClass)
     else {
       resetDroneCandidate()
       droneAlertStatusLabel.text = "새·드론 구분 모델을 선택하세요"
       return
     }
-    let observed = featureTracks.filter(\.observed)
-    let high = observed.first { $0.classification == "드론" }
-    let unknown = observed.first { $0.classification == "미확인 물체" && $0.samples >= 3 }
-    let stage: DroneAlertStage = high != nil ? .high : (unknown != nil ? .unknown : .none)
+    let high = result.boxes.first { $0.aerialDisplayLabel == "드론" }
+    let stage: DroneAlertStage = high != nil ? .high : .none
     if stage == .none { droneAlertAudio.stop() } else { soundForStableStage(stage) }
     previousAlertStage = stage
-    droneAlertStatusLabel.text =
-      high.map { "드론 \(trackingEnabled ? "#\($0.id) " : "")\(Int($0.score * 100))점" }
-      ?? unknown.map { "\($0.displayLabel)\(trackingEnabled ? " #\($0.id)" : "")" }
-      ?? observed.first.map { "\($0.classification)\(trackingEnabled ? " #\($0.id)" : "") · 경보 없음" }
+    droneAlertStatusLabel.text = high.map { "드론 \(Int($0.conf * 100))점" }
+      ?? result.boxes.first(where: { $0.aerialDisplayLabel != nil })?.aerialDisplayLabel
       ?? "감시 중 · 현재 탐지 없음"
   }
 
@@ -720,7 +488,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
-    clearFeatureTracking()
+    clearAerialAlerts()
   }
 
   override func viewDidLoad() {
@@ -880,10 +648,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private func reloadModelEntriesAndLoadFirst(for taskName: String) {
     showModelEntries(for: taskName)
 
-    // Always start with the fast YOLO26 nano engine. When a fine-tuned
-    // YOLO26n bird/drone model is bundled, ModelSelectionManager makes
-    // that the nano selection without changing the camera or inference SDK.
-    let preferredSize: ModelSelectionManager.ModelSize = .n
+    // Keep the original model-loading pipeline; use the user-selected small architecture.
+    let preferredSize: ModelSelectionManager.ModelSize = taskName == "Detect" ? .s : .n
     if let model = standardModels[preferredSize] {
       modelSegmentedControl.selectedSegmentIndex =
         ModelSelectionManager.ModelSize.allCases.firstIndex(of: preferredSize) ?? 0
@@ -1206,7 +972,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
           || modelName.lowercased().contains("drone81")
           || modelName.lowercased().contains("aerial3")
         {
-          // Retain modest-confidence candidates for temporal validation.
+          // Retain single-frame suspicion candidates; never infer identity from motion.
           self.yoloView.setConfidenceThreshold(0.30)
           self.yoloView.setNumItemsThreshold(30)
         }

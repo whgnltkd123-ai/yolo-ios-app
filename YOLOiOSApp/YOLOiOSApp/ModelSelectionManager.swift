@@ -26,7 +26,7 @@ struct ModelSelectionManager {
     -> [ModelSize: ModelInfo]
   {
     var standardModels: [ModelSize: ModelInfo] = [:]
-    var bestNanoPriority = -1
+    var bestPriority: [ModelSize: Int] = [:]
 
     for model in models {
       let baseName = (model.name as NSString).deletingPathExtension.lowercased()
@@ -35,13 +35,13 @@ struct ModelSelectionManager {
         let size = ModelSize(rawValue: String(sizeChar))
       else { continue }
 
-      if size == .n {
+      if size == .n || size == .s {
         let priority: Int
-        if baseName == "yolo26n-aerial3" {
+        if baseName == "yolo26\(size.rawValue)-aerial3" {
           priority = 120
         } else if baseName == "yolo26n-drone81" {
           priority = 100
-        } else if baseName == "yolo26n" || baseName.hasPrefix("yolo26n.mlpackage") {
+        } else if baseName == "yolo26\(size.rawValue)" {
           priority = 80
         } else if baseName.contains("birddrone") {
           priority = 0
@@ -51,8 +51,8 @@ struct ModelSelectionManager {
 
         // A local bundled model wins over a remote model of the same priority.
         let adjusted = priority + (model.isLocal ? 1 : 0)
-        if adjusted <= bestNanoPriority { continue }
-        bestNanoPriority = adjusted
+        if adjusted <= (bestPriority[size] ?? -1) { continue }
+        bestPriority[size] = adjusted
       }
       standardModels[size] = ModelInfo(
         name: model.name,

@@ -119,13 +119,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
 
   public var onDetection: ((YOLOResult) -> Void)?
 
-  /// Changes when camera projection changes; consumers must not carry object IDs across it.
-  public var trackingCameraContext: String {
-    let device = videoCapture.captureDevice
-    return "\(device?.uniqueID ?? "none"):\(device?.videoZoomFactor ?? 1):\(modelName)"
-  }
-
-  /// Opt-in source frames for consumers performing temporal image analysis.
+  /// Opt-in source frames for evidence capture.
   public var capturesOriginalImage = false {
     didSet {
       (videoCapture.predictor as? BasePredictor)?.capturesOriginalImage = capturesOriginalImage
@@ -507,8 +501,6 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   func showBoxes(predictions: YOLOResult) {
     // Iterate directly without constructing a filtered array on every frame.
     // Inference still evaluates every class provided by the selected model.
-    let isBirdDroneModel =
-      modelName.lowercased().contains("birddrone") || modelName.lowercased().contains("drone81")
     let maxVisible = min(50, boundingBoxViews.count)
     let viewSize = bounds.size
     var shown = 0
@@ -517,14 +509,6 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       if shown >= maxVisible { break }
       if task == .detect && showsOnlyAerialDetections
         && !isAerialDetectionClass(prediction.cls)
-      {
-        continue
-      }
-      // Suppress particularly weak speck detections in the legacy test model.
-      if isBirdDroneModel
-        && prediction.cls.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "drone"
-        && (prediction.conf < 0.40
-          || min(prediction.xywhn.width, prediction.xywhn.height) < 0.004)
       {
         continue
       }
@@ -580,11 +564,10 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   private func showBox(at index: Int, prediction: Box, frame: CGRect) {
     showBox(
       at: index,
-      className: prediction.cls,
+      className: prediction.aerialDisplayLabel ?? prediction.cls,
       confidence: CGFloat(prediction.conf),
       classIndex: prediction.index,
-      frame: frame,
-      smallTarget: min(prediction.xywhn.width, prediction.xywhn.height) < 0.02
+      frame: frame
     )
   }
 
@@ -595,46 +578,17 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     confidence: CGFloat,
     classIndex: Int,
     frame: CGRect,
-    smallTarget: Bool = false,
     angle: CGFloat? = nil
   ) {
-    // Bird/drone separation is visible immediately; all other classes retain original YOLO colors.
-    let normalizedClass = className.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let birdClasses: Set<String> = ["bird", "birds"]
-    let airplaneClasses: Set<String> = ["airplane", "aeroplane", "plane"]
-    let droneClasses: Set<String> = [
-      "drone", "drones", "uav", "uas", "quadcopter", "multicopter",
-      "fpv drone", "fpv-drone", "unmanned aerial vehicle", "fixed-wing", "fixed wing",
-    ]
-    let isDroneLabel =
-      droneClasses.contains(normalizedClass)
-      || normalizedClass.hasPrefix("drone ") || normalizedClass.hasSuffix(" drone")
-    let isUncertain =
-      (birdClasses.contains(normalizedClass)
-        || airplaneClasses.contains(normalizedClass) || isDroneLabel)
-      && (confidence < (isDroneLabel ? 0.70 : 0.60) || (isDroneLabel && smallTarget))
-    let color: UIColor =
-      isUncertain
-      ? .systemYellow
-      : birdClasses.contains(normalizedClass)
-        ? .systemGreen
-        : airplaneClasses.contains(normalizedClass)
-          ? .systemBlue
-          : isDroneLabel
-            ? .systemRed
-            : ultralyticsColors[classIndex % ultralyticsColors.count]
-    // These are single-frame scores, not independently confirmed identities.
-    let localizedClass =
-      isUncertain
-      ? "미확인 물체"
-      : birdClasses.contains(normalizedClass)
-        ? "새"
-        : airplaneClasses.contains(normalizedClass)
-          ? "비행기 후보"
-          : isDroneLabel
-            ? "드론"
-            : className
-    let label = DetectionLabelStyle.text(className: localizedClass, confidence: confidence)
+    let color: UIColor
+    switch className {
+    case "드론": color = .systemRed
+    case "새": color = .systemGreen
+    case "비행기": color = .systemBlue
+    case "드론 의심", "새 의심", "미확인 물체": color = .systemYellow
+    default: color = ultralyticsColors[classIndex % ultralyticsColors.count]
+    }
+    let label = DetectionLabelStyle.text(className: className, confidence: confidence)
     let alpha = DetectionLabelStyle.alpha(confidence: confidence)
     boundingBoxViews[index].show(
       frame: frame, label: label, color: color, alpha: alpha, angle: angle)
