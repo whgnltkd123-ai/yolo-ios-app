@@ -6,6 +6,7 @@ public enum AerialRecognitionMode: Int, Sendable {
   case original = 0, tracking = 1, compensatedTracking = 2
 }
 public struct TrackedAerialObject: Sendable {
+  /// Positive: official tracker ID. Zero: observed detector candidate without an ID.
   public let id: Int
   public let rect: CGRect
   public let observed: Bool
@@ -70,7 +71,7 @@ final class AerialMotionTracker {
         obt_update(engine,source.baseAddress,Int32(source.count),destination.baseAddress,50)
       }
     }
-    guard count >= 0 else { return [] }
+    guard count >= 0 else { reset(); return [] }
     if disrupted {
       for id in Array(evidence.keys) {
         evidence[id]?.scores = nil; evidence[id]?.hits = 0
@@ -123,6 +124,18 @@ final class AerialMotionTracker {
     for (id,e) in evidence where !observed.contains(id) && !disrupted && time-e.lastSeen <= 0.25 {
       output.append(TrackedAerialObject(id:id,rect:e.rect,observed:false,
         label:"관측 끊김",score:0,detectionIndex:nil))
+    }
+    // Keep 30-point detector candidates visible without inventing a tracker ID.
+    // Upstream births require .6; do not lower its threshold or hide real observations.
+    let assigned = Set(output.compactMap(\.detectionIndex))
+    for index in valid where !assigned.contains(index) && boxes[index].conf >= 0.30 {
+      let b = boxes[index]
+      var label = b.aerialDisplayLabel ?? "미확인 물체"
+      if label == "드론" { label = "드론 의심" }
+      if label == "새" { label = "새 의심" }
+      if disrupted { label = "미확인 물체" }
+      output.append(TrackedAerialObject(id:0,rect:b.xywhn,observed:true,
+        label:label,score:b.conf,detectionIndex:index))
     }
     return output.sorted { $0.id < $1.id }
   }

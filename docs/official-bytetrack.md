@@ -19,3 +19,5 @@ Missing observations are shown briefly as last observed position, marked '관측
 Pinned Eigen3 and OpenCV header dependencies are prepared before build; only needed inline OpenCV geometry is used, no OpenCV image/inference runtime. Build must prove this does not require unresolved runtime symbols.
 Validation pending: native C++ smoke, iOS Simulator decisions/IDs, device build. iPhone15 FPS/p95 latency/thermal/field IDs and camera motion performance are NOT measured.
 Deployment gate: same footage baseline vs new in modes1/2/3, report actual camera/AI FPS, p95 latency, ID switches and false merges. Do not assert unchanged speed from a successful build.
+
+Platform exception: the upstream rectangular-cost error branch used desktop system(pause)/exit. It now throws invalid_argument; the C ABI catches exceptions and Swift resets the failed engine. Normal assignment is unchanged. Unassigned detector candidates >=.30 remain visible without an ID; they are not counted as tracker births. Native macOS smoke passed at 5d84894; iOS verification remains pending.

@@ -533,7 +533,8 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       let objects = Array(tracking.objects.prefix(boundingBoxViews.count))
       for (index, object) in objects.enumerated() {
         let rect = aspectFillDisplayRect(for:object.rect,imageSize:predictions.orig_shape,viewSize:bounds.size)
-        showBox(at:index,className:"#\(object.id) \(object.label)",confidence:CGFloat(object.score),
+        let caption = object.id > 0 ? "#\(object.id) \(object.label)" : object.label
+        showBox(at:index,className:caption,confidence:CGFloat(object.score),
           classIndex:object.observed ? 0 : 1,frame:rect)
       }
       for index in objects.count..<boundingBoxViews.count { boundingBoxViews[index].hide() }

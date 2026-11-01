@@ -7,6 +7,7 @@ void obt_destroy(void *handle) { delete static_cast<BYTETracker *>(handle); }
 int32_t obt_update(void *handle, const OBTDetection *input, int32_t count,
                   OBTTrack *output, int32_t capacity) {
     if (!handle || count < 0 || count > 50 || capacity < 0 || (count && !input) || !output) return -1;
+    try {
     std::vector<Object> objects;
     objects.reserve(count);
     for (int i=0; i<count; ++i) {
@@ -23,4 +24,5 @@ int32_t obt_update(void *handle, const OBTDetection *input, int32_t count,
         output[i]={t.tlwh[0],t.tlwh[1],t.tlwh[2],t.tlwh[3],t.score,t.track_id,t.detection_index};
     }
     return n;
+    } catch (...) { return -2; }
 }

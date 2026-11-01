@@ -64,7 +64,11 @@ final class MotionTrackingTests: XCTestCase {
   func testOfficialWeakDetectionsRescueButDoNotStartIDs() {
     let tracker = AerialMotionTracker()
     for i in 0..<10 {
-      XCTAssertTrue(tracker.update(boxes:[box(0.2,score:0.3)],time:1+Double(i)*0.05).isEmpty)
+      let candidate = tracker.update(boxes:[box(0.2,score:0.3)],time:1+Double(i)*0.05)
+      XCTAssertEqual(candidate.count,1)
+      XCTAssertEqual(candidate.first?.id,0)
+      XCTAssertEqual(candidate.first?.detectionIndex,0)
+      XCTAssertEqual(candidate.first?.label,"드론 의심")
     }
     let initialized = AerialMotionTracker()
     let id = initialized.update(boxes:[box(0.2)],time:1).first?.id

@@ -1,5 +1,6 @@
 #include "BYTETracker.h"
 #include "lapjv.h"
+#include <stdexcept>
 
 vector<STrack*> BYTETracker::joint_stracks(vector<STrack*> &tlista, vector<STrack> &tlistb)
 {
@@ -222,7 +223,7 @@ vector<vector<float> > BYTETracker::iou_distance(vector<STrack*> &atracks, vecto
 	dist_size_size = btracks.size();
 
 	vector<vector<float> > _ious = ious(atlbrs, btlbrs);
-	
+
 	for (int i = 0; i < _ious.size();i++)
 	{
 		vector<float> _iou;
@@ -286,11 +287,11 @@ double BYTETracker::lapjv(const vector<vector<float> > &cost, vector<int> &rowso
 		if (!extend_cost)
 		{
 			cout << "set extend_cost=True" << endl;
-			system("pause");
-			exit(0);
+			throw std::invalid_argument("ByteTrack requires extend_cost for rectangular costs");
+
 		}
 	}
-		
+
 	if (extend_cost || cost_limit < LONG_MAX)
 	{
 		n = n_rows + n_cols;
@@ -366,9 +367,11 @@ double BYTETracker::lapjv(const vector<vector<float> > &cost, vector<int> &rowso
 	int ret = lapjv_internal(n, cost_ptr, x_c, y_c);
 	if (ret != 0)
 	{
-		cout << "Calculate Wrong!" << endl;
-		system("pause");
-		exit(0);
+		for (int i = 0; i < n; ++i) delete[] cost_ptr[i];
+		delete[] cost_ptr;
+		delete[] x_c;
+		delete[] y_c;
+		throw std::runtime_error("ByteTrack assignment failed");
 	}
 
 	double opt = 0.0;
