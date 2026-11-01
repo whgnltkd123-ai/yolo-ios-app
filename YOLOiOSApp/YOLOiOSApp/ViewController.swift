@@ -447,6 +447,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
   // MARK: - Constants
   private struct Constants {
     static let defaultTask = YOLOTask.detect
+    static let logoURL = "https://www.ultralytics.com"
     static let progressViewWidth: CGFloat = 200
   }
 
