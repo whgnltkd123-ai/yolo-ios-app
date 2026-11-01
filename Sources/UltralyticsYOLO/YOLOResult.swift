@@ -23,6 +23,19 @@ import UIKit
 /// - Important: Marked `@unchecked Sendable` so results can cross actor boundaries; fields are written once during
 ///   construction and treated as read-only thereafter.
 public struct YOLOResult: @unchecked Sendable {
+  /// Separate from detector boxes: predictions are never inserted into `boxes`.
+  public var tracking: AerialTrackingFrame? = nil
+  /// Opt-in profiling only; camera FPS is delivered buffers, not screen refresh rate.
+  public var aerialPerformance: [String: Double]? = nil
+
+  public var confirmedAerialDrone: Box? {
+    if let tracking {
+      guard let item = tracking.objects.first(where: { $0.observed && $0.label == "드론" }),
+        let index = item.detectionIndex, boxes.indices.contains(index) else { return nil }
+      return boxes[index]
+    }
+    return boxes.first { $0.aerialDisplayLabel == "드론" }
+  }
   /// The original dimensions of the input image that was processed.
   public let orig_shape: CGSize
 

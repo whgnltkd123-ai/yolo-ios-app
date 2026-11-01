@@ -45,6 +45,8 @@ public class BasePredictor: Predictor, @unchecked Sendable {
 
   /// Explicit schema for the aerial export's same-anchor drone/bird/airplane scores.
   var hasAerialClassScores = false
+  /// Only the opt-in aerial tracker consumes weak real detections; never fabricated boxes.
+  var retainsWeakAerialDetections = false
 
   /// Whether camera predictions should include a copy of the original input image in `YOLOResult`.
   public var capturesOriginalImage = false
