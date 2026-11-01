@@ -84,10 +84,10 @@ private final class DroneAlertSoundPlayer {
 
   private static func makeTone(stage: Int) -> Data {
     let sampleRate = 22_050
-    let duration = stage == 3 ? 1.6 : 0.48
+    let duration = Double(stage) * 0.24
     let count = Int(Double(sampleRate) * duration)
-    // High alert is a continuous phase-aligned siren, not a one-second mute loop.
-    let silenceCount = stage == 3 ? 0 : (stage == 2 ? sampleRate / 3 : sampleRate)
+    // One, two or three distinct pulses per group; repeat only while observed.
+    let silenceCount = sampleRate
     let byteCount = (count + silenceCount) * 2
     var wav = Data(capacity: 44 + byteCount)
     func ascii(_ string: String) { wav.append(contentsOf: string.utf8) }
@@ -117,21 +117,11 @@ private final class DroneAlertSoundPlayer {
     var phase = 0.0
     for index in 0..<count {
       let t = Double(index) / Double(sampleRate)
-      let frequency: Double
-      let gate: Double
-      switch stage {
-      case 1:  // Unknown: two short pulses
-        frequency = 630
-        gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.55 : 0
-      case 2:  // Suspected drone: faster, higher-pitched double pulse
-        frequency = 820
-        gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.65 : 0
-      default:  // High-confidence model indication: alternating siren
-        frequency = 950 + 390 * sin(2 * .pi * 2.5 * t)
-        gate = 0.80
-      }
+      let pulseTime = t.truncatingRemainder(dividingBy: 0.24)
+      let frequency = stage == 1 ? 630.0 : (stage == 2 ? 820.0 : 1100.0)
+      let gate = pulseTime < 0.13 ? (stage == 1 ? 0.55 : 0.80) : 0
       phase += 2 * .pi * frequency / Double(sampleRate)
-      let fade = stage == 3 ? 1.0 : min(1.0, min(t * 50, (duration - t) * 50))
+      let fade = min(1.0, min(pulseTime * 100, (0.13 - pulseTime) * 100))
       let sample = Int16(max(-1, min(1, sin(phase) * gate * max(0, fade))) * 32767)
       le16(UInt16(bitPattern: sample))
     }
@@ -468,8 +458,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     case .high:
       UINotificationFeedbackGenerator().notificationOccurred(.error)
       AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
-    case .suspected: UINotificationFeedbackGenerator().notificationOccurred(.warning)
-    case .unknown, .none: break
+    case .suspected, .unknown, .none: break
     }
   }
 
