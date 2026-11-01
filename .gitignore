@@ -253,3 +253,5 @@ Tests/YOLOTests/Resources/*.mlpackage
 
 Package.resolved
 exports/
+# Generated pinned third-party headers; prepared before Xcode resolves local targets.
+Sources/OfficialByteTrack/dependencies/

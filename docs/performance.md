@@ -492,3 +492,6 @@ Detection is run on camera frames, not gated on target velocity or frame differe
 Tiny-box scale comparison now uses a four-pixel-at-640 floor solely for association, so 1-to-5-pixel size jitter does not fail the size-ratio gate. Detector/display boxes remain unchanged. Disrupted frames permit bounded center matching (maximum .02 normalized coordinates), with Mahalanobis, scale and ambiguity rejection retained; disruption still revokes class confirmation. This corrects a path that required >.55 IoU while zooming even for tiny boxes. It is not a full zoom/rotation warp or an identity guarantee.
 
 Synthetic stationary-size-jitter/disruption and local warning-stage tests were added to the existing simulator test suite. Device ID accuracy, distant recall, speaker output, FPS and thermal behavior remain unmeasured for this revision. Persistent confident bird-to-drone errors require new source-verified training examples and source-separated evaluation; thresholds and checkpoint are not altered by this code fix.
+# Original-author ByteTrack replacement (2026-11-01)
+
+See [official-bytetrack.md](official-bytetrack.md) for pinned source, integration changes and pending validation. Mode1 and c7 detector weights remain unchanged. Device FPS, thermal behavior and ID continuity have not been verified; no performance claim is made.

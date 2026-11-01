@@ -1016,7 +1016,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
           || modelName.lowercased().contains("aerial3")
         {
           // Retain single-frame suspicion candidates; never infer identity from motion.
-          self.yoloView.setConfidenceThreshold(0.30)
+          self.yoloView.setConfidenceThreshold(self.yoloView.aerialRecognitionMode.detectorConfidenceThreshold)
           self.yoloView.setNumItemsThreshold(30)
         }
       }

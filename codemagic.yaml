@@ -108,6 +108,9 @@ workflows:
         - pattern: fix/small-target-continuity
           include: true
           source: true
+        - pattern: fix/official-bytetrack-native
+          include: true
+          source: true
         - pattern: feat/native-motion-tracking
           include: true
           source: true
@@ -125,6 +128,20 @@ workflows:
         YOLO26_DRONE_CHECKPOINT_PATH: checkpoints/aerial-three/best.pt
         YOLO26_DRONE_CHECKPOINT_SHA256: "c7df126a039c1edde8d6b3e0c78be99f43e6770913eb1ff201976e2cf2505d26"
     scripts:
+      - name: Prepare pinned original-author ByteTrack and verify native continuity
+        script: |
+          set -euo pipefail
+          python3 tools/prepare_bytetrack_dependencies.py
+          mkdir -p build
+          xcrun clang++ -std=c++14 -O2 \
+            -I Sources/OfficialByteTrack/include \
+            -I Sources/OfficialByteTrack/upstream/include \
+            -I Sources/OfficialByteTrack/dependencies/eigen \
+            -I Sources/OfficialByteTrack/dependencies/opencv \
+            Sources/OfficialByteTrack/upstream/src/*.cpp \
+            Sources/OfficialByteTrack/Bridge.cpp tools/bytetrack_smoke.cpp \
+            -o build/bytetrack-smoke
+          build/bytetrack-smoke
       - name: Verify trained YOLO26 checkpoint and convert to Core ML
         script: |
           set -euo pipefail
@@ -152,7 +169,7 @@ workflows:
       - name: Verify aerial decisions on iOS Simulator
         script: |
           set -euo pipefail
-          case "$CM_BRANCH" in feat/tracking-evidence-alerts|feat/reinforced-aerial-model|feat/stable-aerial-tracking|feat/native-no-tracking-yolo26s|feat/native-motion-tracking|fix/small-target-continuity) ;; *) exit 0 ;; esac
+          case "$CM_BRANCH" in feat/tracking-evidence-alerts|feat/reinforced-aerial-model|feat/stable-aerial-tracking|feat/native-no-tracking-yolo26s|feat/native-motion-tracking|fix/small-target-continuity|fix/official-bytetrack-native) ;; *) exit 0 ;; esac
           IOS_SIMULATOR=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if "iOS" in k for x in v if "iPhone" in x["name"] and x["isAvailable"]))')
           xcodebuild -scheme UltralyticsYOLO -sdk iphonesimulator \
             -destination "platform=iOS Simulator,id=$IOS_SIMULATOR,arch=arm64" \
