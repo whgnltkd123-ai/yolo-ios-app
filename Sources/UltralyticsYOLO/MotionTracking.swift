@@ -55,9 +55,9 @@ final class AerialMotionTracker {
     let id: Int
     var axes: [MotionAxis]
     var lastSeen: Double
-    var lastStrong: Double
     var scores: [Float]?
     var hits = 1
+    var observations = 1
     var observedIndex: Int?
     var score: Float
     var rect: CGRect {
@@ -77,9 +77,9 @@ final class AerialMotionTracker {
               disrupted: Bool = false) -> [TrackedAerialObject] {
     let elapsed = previousTime.map { time - $0 } ?? 0
     previousTime = time
-    if elapsed < 0 || elapsed > 0.75 { tracks.removeAll() }
-    let dt = min(0.25, max(0, elapsed))
-    tracks.removeAll { time - $0.lastSeen > 0.45 || time - $0.lastStrong > 0.75 }
+    if elapsed < 0 || elapsed > 1.0 { tracks.removeAll() }
+    let dt = min(1.0, max(0, elapsed))
+    tracks.removeAll { time - $0.lastSeen > 1.0 }
     for i in tracks.indices {
       tracks[i].observedIndex = nil
       for j in 0..<4 { tracks[i].axes[j].predict(dt) }
@@ -99,7 +99,7 @@ final class AerialMotionTracker {
     }.prefix(50)
     var remaining = Set(valid), unused = Set(tracks.indices)
     var ambiguous = Set<Int>()
-    // High-score association first. Low-score detections rescue only existing IDs.
+    // High-score association first, then weak candidates with tentative births.
     for high in [true, false] {
       let candidates = remaining.filter { (boxes[$0].conf >= 0.30) == high }
       var edges: [(Double, Int, Int)] = []
@@ -113,8 +113,14 @@ final class AerialMotionTracker {
           let mahalanobis = dx*dx/(tracks[t].axes[0].p00+0.0001)
             + dy*dy/(tracks[t].axes[1].p00+0.0001)
           let scale = [r.width/a.width, a.width/r.width, r.height/a.height, a.height/r.height].max() ?? 10
-          guard scale < 2.5, mahalanobis < 9.21, iou > (disrupted ? 0.55 : 0.10) else { continue }
-          edges.append((Double(1-iou) + 0.05*mahalanobis, t, b))
+          // Tiny boxes can stop overlapping after only a few pixels of motion.
+          let extent = max(max(a.width,a.height),max(r.width,r.height))
+          let radius = min(0.04, max(0.0125, Double(extent)*1.5))
+          let distance = sqrt(dx*dx + dy*dy)
+          let nearby = !disrupted && distance <= radius
+          guard scale < 2.5, mahalanobis < 9.21,
+            iou > (disrupted ? 0.55 : 0.10) || nearby else { continue }
+          edges.append((0.5*Double(1-iou) + 0.5*distance/radius + 0.05*mahalanobis, t, b))
         }
       }
       // Reject near-ties on either side instead of guessing identities in crossings.
@@ -137,11 +143,11 @@ final class AerialMotionTracker {
         let box = boxes[e.2], r = box.xywhn
         let values = [r.midX,r.midY,r.width,r.height].map(Double.init)
         for j in 0..<4 { tracks[e.1].axes[j].correct(values[j]) }
+        tracks[e.1].observations = time-tracks[e.1].lastSeen <= 0.35 ? tracks[e.1].observations+1 : 1
         tracks[e.1].lastSeen = time
         tracks[e.1].observedIndex = e.2
         tracks[e.1].score = box.conf
         if high {
-          tracks[e.1].lastStrong = time
           tracks[e.1].hits += 1
           if let scores = Self.scores(box) {
             let alpha = Float(1-exp(-max(dt,0.01)/0.20))
@@ -153,18 +159,20 @@ final class AerialMotionTracker {
         unused.remove(e.1); remaining.remove(e.2)
       }
     }
-    for b in remaining.sorted() where boxes[b].conf >= 0.30 && !ambiguous.contains(b) {
+    for b in remaining.sorted() where !ambiguous.contains(b) {
       guard tracks.count < 50 else { break }
       let box = boxes[b], r = box.xywhn
       // Do not manufacture a second ID for a near-duplicate anchor/ambiguous crossing.
       if tracks.contains(where: { $0.rect.intersects(r) }) { continue }
       tracks.append(Track(id: nextID,
         axes: [r.midX,r.midY,r.width,r.height].map { MotionAxis(position: Double($0)) },
-        lastSeen: time, lastStrong: time, scores: Self.scores(box), observedIndex: b, score: box.conf))
+        lastSeen: time, scores: Self.scores(box), observedIndex: b, score: box.conf))
       nextID += 1
     }
     return tracks.compactMap { t in
       let observed = t.observedIndex != nil
+      // Weak births are invisible until repeated real observations establish a candidate.
+      guard t.score >= 0.30 || t.observations >= 3 else { return nil }
       guard observed || (!disrupted && time-t.lastSeen <= 0.25) else { return nil }
       var label = "미확인 물체"
       if observed, t.score >= 0.30, t.hits >= 3, let scores = t.scores,

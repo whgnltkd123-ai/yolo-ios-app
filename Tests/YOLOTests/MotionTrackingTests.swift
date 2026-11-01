@@ -48,6 +48,31 @@ final class MotionTrackingTests: XCTestCase {
       processingMS:0,latencyMS:0,thermalState:0)
     XCTAssertNil(result.confirmedAerialDrone)
   }
+  func testTinyNonOverlappingBoxesAndBriefGapKeepIdentity() {
+    let tracker = AerialMotionTracker()
+    func tiny(_ x: CGFloat, _ score: Float = 0.8) -> Box {
+      let r = CGRect(x:x,y:0.3,width:0.006,height:0.006)
+      return Box(index:0,cls:"drone",conf:score,xywh:r,xywhn:r,
+        classScores:["drone":score,"bird":0.01,"airplane":0.01])
+    }
+    let id = tracker.update(boxes:[tiny(0.2)],time:1).first?.id
+    XCTAssertEqual(tracker.update(boxes:[tiny(0.208)],time:1.05).first?.id,id)
+    _ = tracker.update(boxes:[],time:1.3)
+    XCTAssertEqual(tracker.update(boxes:[tiny(0.21)],time:1.6).first?.id,id)
+    let weak = AerialMotionTracker()
+    XCTAssertTrue(weak.update(boxes:[tiny(0.2,0.2)],time:1).isEmpty)
+    XCTAssertTrue(weak.update(boxes:[tiny(0.201,0.2)],time:1.1).isEmpty)
+    let candidate = weak.update(boxes:[tiny(0.202,0.2)],time:1.2)
+    XCTAssertEqual(candidate.first?.label,box(0.2,score:0.2).aerialDisplayLabel)
+    XCTAssertEqual(candidate.first?.observed,true)
+    XCTAssertNotNil(candidate.first?.detectionIndex)
+  }
+  func testNearbyAmbiguousObjectsAreNotForcedIntoOneID() {
+    let tracker = AerialMotionTracker()
+    _ = tracker.update(boxes:[box(0.2)],time:1)
+    let ambiguous = tracker.update(boxes:[box(0.19),box(0.21)],time:1.05)
+    XCTAssertFalse(ambiguous.contains { $0.observed })
+  }
   func testSparseFlowTranslationAndTexturelessFailure() {
     let flow = CameraMotionCompensation()
     var old = [UInt8](repeating:0,count:96*64)
