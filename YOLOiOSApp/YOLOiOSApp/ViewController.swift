@@ -50,7 +50,7 @@ private final class DroneAlertSoundPlayer {
   }
 
   func play(stage: Int) {
-    guard stage == 1 || stage == 3 else { return }
+    guard (1...3).contains(stage) else { return }
     // A loop must expire if camera results stop arriving.
     stopWhenResultsExpire?.cancel()
     let expiry = DispatchWorkItem { [weak self] in self?.stop() }
@@ -84,10 +84,10 @@ private final class DroneAlertSoundPlayer {
 
   private static func makeTone(stage: Int) -> Data {
     let sampleRate = 22_050
-    let duration = stage == 1 ? 0.48 : 1.6
+    let duration = stage == 3 ? 1.6 : 0.48
     let count = Int(Double(sampleRate) * duration)
     // High alert is a continuous phase-aligned siren, not a one-second mute loop.
-    let silenceCount = stage == 3 ? 0 : sampleRate
+    let silenceCount = stage == 3 ? 0 : (stage == 2 ? sampleRate / 3 : sampleRate)
     let byteCount = (count + silenceCount) * 2
     var wav = Data(capacity: 44 + byteCount)
     func ascii(_ string: String) { wav.append(contentsOf: string.utf8) }
@@ -123,6 +123,9 @@ private final class DroneAlertSoundPlayer {
       case 1:  // Unknown: two short pulses
         frequency = 630
         gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.55 : 0
+      case 2:  // Suspected drone: faster, higher-pitched double pulse
+        frequency = 820
+        gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.65 : 0
       default:  // High-confidence model indication: alternating siren
         frequency = 950 + 390 * sin(2 * .pi * 2.5 * t)
         gate = 0.80
@@ -172,8 +175,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   // MARK: - Stable bird/drone warning levels (experimental model estimates, not identity proof)
   private enum DroneAlertStage: Int, Hashable {
-    case none = 0
-    case high = 3
+    case none = 0, unknown = 1, suspected = 2, high = 3
   }
 
   private let aerialBoxesButton = UIButton(type: .system)
@@ -466,7 +468,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
     case .high:
       UINotificationFeedbackGenerator().notificationOccurred(.error)
       AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
-    case .none: break
+    case .suspected: UINotificationFeedbackGenerator().notificationOccurred(.warning)
+    case .unknown, .none: break
     }
   }
 
@@ -491,23 +494,20 @@ class ViewController: UIViewController, YOLOViewDelegate {
       droneAlertStatusLabel.text = "새·드론 구분 모델을 선택하세요"
       return
     }
-    let high = result.confirmedAerialDrone
-    let stage: DroneAlertStage = high != nil ? .high : .none
-    if stage == .high {
+    let stage = DroneAlertStage(rawValue: result.aerialWarningLevel) ?? .none
+    if stage != .none {
       soundForStableStage(stage)
       previousAlertStage = stage
-    } else if result.boxes.contains(where: {
-      // Contrary/ambiguous evidence revokes audio immediately. Empty frames or a
-      // weaker unambiguous drone let the last real confirmation expire in .35s.
-      let label = $0.aerialDisplayLabel
-      return label != nil && label != "드론" && label != "드론 의심"
-    }) {
+    } else if !result.boxes.isEmpty {
       resetDroneCandidate()
     }
     // No call to play on missing/predicted evidence: the short audio tail cannot refresh itself.
-    droneAlertStatusLabel.text = high.map { "드론 \(Int($0.conf * 100))점" }
-      ?? result.boxes.first(where: { $0.aerialDisplayLabel != nil })?.aerialDisplayLabel
-      ?? "감시 중 · 현재 탐지 없음"
+    switch stage {
+    case .high: droneAlertStatusLabel.text = "드론 확정 · 3단계 경보"
+    case .suspected: droneAlertStatusLabel.text = "드론 의심 · 2단계 경보"
+    case .unknown: droneAlertStatusLabel.text = "미확인 후보 · 1단계 알림"
+    case .none: droneAlertStatusLabel.text = "감시 중 · 경보 대상 없음"
+    }
   }
 
   // MARK: - Constants

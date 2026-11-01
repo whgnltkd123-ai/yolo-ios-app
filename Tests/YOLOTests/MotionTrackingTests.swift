@@ -86,6 +86,38 @@ final class MotionTrackingTests: XCTestCase {
     let ambiguous = tracker.update(boxes:[box(0.19),box(0.21)],time:1.05)
     XCTAssertFalse(ambiguous.contains { $0.observed })
   }
+  func testStationaryTinySizeJitterAndDisruptionPreserveIdentity() {
+    let tracker = AerialMotionTracker()
+    var id: Int?
+    for i in 0..<40 {
+      let size: CGFloat = i % 2 == 0 ? 0.002 : 0.008
+      let r = CGRect(x:0.3-size/2,y:0.3-size/2,width:size,height:size)
+      let b = Box(index:0,cls:"drone",conf:0.8,xywh:r,xywhn:r,
+        classScores:["drone":0.8,"bird":0.01,"airplane":0.01])
+      let output = tracker.update(boxes:[b],time:1+Double(i)*0.1,disrupted:i == 20)
+      if i == 0 { id = output.first?.id }
+      XCTAssertEqual(output.first?.id,id)
+      XCTAssertEqual(output.first?.observed,true)
+      if i == 20 { XCTAssertEqual(output.first?.label,"미확인 물체") }
+    }
+  }
+
+  func testWarningStagesRespectObservedTrackingDecisions() {
+    var result = YOLOResult(orig_shape:.zero,boxes:[box(0.2,score:0.4)],
+      speed:0,names:["drone","bird","airplane"])
+    XCTAssertEqual(result.aerialWarningLevel,2)
+    for (label, expected) in [("미확인 물체",1),("드론 의심",2),("드론",3),("새",0)] {
+      result.tracking = AerialTrackingFrame(objects:[TrackedAerialObject(id:1,rect:.zero,
+        observed:true,label:label,score:0.4,detectionIndex:0)],cameraState:"test",
+        processingMS:0,latencyMS:0,thermalState:0)
+      XCTAssertEqual(result.aerialWarningLevel,expected)
+    }
+    result.tracking = AerialTrackingFrame(objects:[TrackedAerialObject(id:1,rect:.zero,
+      observed:false,label:"드론",score:0.9,detectionIndex:nil)],cameraState:"test",
+      processingMS:0,latencyMS:0,thermalState:0)
+    XCTAssertEqual(result.aerialWarningLevel,0)
+  }
+
   func testSparseFlowTranslationAndTexturelessFailure() {
     let flow = CameraMotionCompensation()
     var old = [UInt8](repeating:0,count:96*64)

@@ -115,12 +115,16 @@ final class AerialMotionTracker {
           let dx = Double(a.midX-r.midX), dy = Double(a.midY-r.midY)
           let mahalanobis = dx*dx/(tracks[t].axes[0].p00+0.0001)
             + dy*dy/(tracks[t].axes[1].p00+0.0001)
-          let scale = [r.width/a.width, a.width/r.width, r.height/a.height, a.height/r.height].max() ?? 10
+          // A few pixels of size jitter must not split a tiny object's identity.
+          // The floor applies to association only, never to the displayed/detector box.
+          let aw = max(a.width, 0.00625), ah = max(a.height, 0.00625)
+          let rw = max(r.width, 0.00625), rh = max(r.height, 0.00625)
+          let scale = [rw/aw, aw/rw, rh/ah, ah/rh].max() ?? 10
           // Tiny boxes can stop overlapping after only a few pixels of motion.
           let extent = max(max(a.width,a.height),max(r.width,r.height))
-          let radius = min(0.04, max(0.0125, Double(extent)*1.5))
+          let radius = min(disrupted ? 0.02 : 0.04, max(0.0125, Double(extent)*1.5))
           let distance = sqrt(dx*dx + dy*dy)
-          let nearby = !disrupted && distance <= radius
+          let nearby = distance <= radius
           guard scale < 2.5, mahalanobis < 9.21,
             iou > (disrupted ? 0.55 : 0.10) || nearby else { continue }
           edges.append((0.5*Double(1-iou) + 0.5*distance/radius + 0.05*mahalanobis, t, b))
