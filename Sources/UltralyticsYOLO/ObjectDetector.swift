@@ -163,7 +163,7 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
     for i in 0..<numDetections {
       let base = i * detStride
       let conf = pointer[base + 4 * fieldStride]
-      let threshold = hasAerialClassScores && retainsWeakAerialDetections ? min(confThreshold, 0.10) : confThreshold
+      let threshold = retainsWeakAerialDetections ? min(confThreshold, 0.10) : confThreshold
       guard conf > threshold else { continue }
 
       let x1 = CGFloat(pointer[base])
@@ -178,6 +178,10 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
         fromModelRect: CGRect(x: x1, y: y1, width: x2 - x1, height: y2 - y1))
       let normalizedBox = normalizedRect(fromInputRect: imageRect)
       let label = labelName(for: classIndex)
+
+      if retainsWeakAerialDetections && !["drone", "bird", "airplane"].contains(label.lowercased()) {
+        continue
+      }
 
       var box = Box(
         index: classIndex, cls: label, conf: conf, xywh: imageRect, xywhn: normalizedBox)

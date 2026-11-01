@@ -750,7 +750,7 @@ extension VideoCapture: ResultsListener, InferenceTimeListener {
   public func on(result: YOLOResult) {
     // Vision inference is synchronous on cameraQueue. Association runs here, never on main.
     var delivered = result
-    if let tracker = aerialTracker, result.names == ["drone", "bird", "airplane"] {
+    if let tracker = aerialTracker, result.names.contains("bird"), result.names.contains("airplane") {
       let start = CACurrentMediaTime()
       let objects = tracker.update(boxes:result.boxes,time:trackingTimestamp,
         translation:motionEstimate.translation,disrupted:motionEstimate.disrupted)

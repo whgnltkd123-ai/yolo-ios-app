@@ -23,8 +23,9 @@ public struct AerialTrackingFrame: Sendable {
 }
 
 /// Independent constant-velocity Kalman axes, normalized image coordinates.
-/// No ReID; conservative two-stage association inspired by BoT-SORT/ByteTrack.
-/// This is not a numerically identical port of either upstream implementation.
+/// Swift motion state; association uses Ultralytics ByteTrack's separate
+/// high/low detection stages and high-only births. No ReID model.
+/// This adapter is not a numerically identical port of the Python tracker.
 struct MotionAxis {
   var position: Double
   var velocity = 0.0
@@ -58,6 +59,7 @@ final class AerialMotionTracker {
     var scores: [Float]?
     var hits = 1
     var observations = 1
+    var missedFrames = 0
     var decisionClass: String?
     var decisionSince: Double
     var observedIndex: Int?
@@ -79,10 +81,11 @@ final class AerialMotionTracker {
               disrupted: Bool = false) -> [TrackedAerialObject] {
     let elapsed = previousTime.map { time - $0 } ?? 0
     previousTime = time
-    if elapsed < 0 || elapsed > 1.0 { tracks.removeAll() }
+    if elapsed < 0 { tracks.removeAll() }
     let dt = min(1.0, max(0, elapsed))
-    tracks.removeAll { time - $0.lastSeen > 1.0 }
+    tracks.removeAll { $0.missedFrames > 30 || time - $0.lastSeen > 3.0 }
     for i in tracks.indices {
+      tracks[i].missedFrames += 1
       tracks[i].observedIndex = nil
       for j in 0..<4 { tracks[i].axes[j].predict(dt) }
       tracks[i].axes[0].position += Double(translation.x)
@@ -102,9 +105,9 @@ final class AerialMotionTracker {
     }.prefix(50)
     var remaining = Set(valid), unused = Set(tracks.indices)
     var ambiguous = Set<Int>()
-    // High-score association first, then weak candidates with tentative births.
+    // ByteTrack: weak detections recover existing identities, never create them.
     for high in [true, false] {
-      let candidates = remaining.filter { (boxes[$0].conf >= 0.30) == high }
+      let candidates = remaining.filter { (boxes[$0].conf >= 0.25) == high }
       var edges: [(Double, Int, Int)] = []
       for t in unused.sorted() {
         for b in candidates.sorted() {
@@ -133,7 +136,10 @@ final class AerialMotionTracker {
       // Reject near-ties on either side instead of guessing identities in crossings.
       edges.sort { $0.0 == $1.0 ? ($0.1, $0.2) < ($1.1, $1.2) : $0.0 < $1.0 }
       var blockedTracks = Set<Int>()
-      for e in edges {
+      // Global minimum-cost assignment, rather than greedily consuming the
+      // nearest edge and forcing the remaining object into a new identity.
+      let assigned = Self.assign(edges, tracks: unused.sorted(), detections: candidates.sorted())
+      for e in assigned {
         guard unused.contains(e.1), remaining.contains(e.2), !blockedTracks.contains(e.1),
           !ambiguous.contains(e.2) else { continue }
         let rivals = edges.filter {
@@ -159,6 +165,7 @@ final class AerialMotionTracker {
         tracks[e.1].decisionClass = decision
         tracks[e.1].observations = continuous ? tracks[e.1].observations+1 : 1
         tracks[e.1].lastSeen = time
+        tracks[e.1].missedFrames = 0
         tracks[e.1].observedIndex = e.2
         tracks[e.1].score = box.conf
         if high {
@@ -173,7 +180,7 @@ final class AerialMotionTracker {
         unused.remove(e.1); remaining.remove(e.2)
       }
     }
-    for b in remaining.sorted() where !ambiguous.contains(b) {
+    for b in remaining.sorted() where !ambiguous.contains(b) && boxes[b].conf >= 0.25 {
       guard tracks.count < 50 else { break }
       let box = boxes[b], r = box.xywhn
       // Do not manufacture a second ID for a near-duplicate anchor/ambiguous crossing.
@@ -186,10 +193,16 @@ final class AerialMotionTracker {
     }
     return tracks.compactMap { t in
       let observed = t.observedIndex != nil
-      // Weak births are invisible until repeated real observations establish a candidate.
-      guard t.score >= 0.30 || t.observations >= 3 else { return nil }
       guard observed || (!disrupted && time-t.lastSeen <= 0.25) else { return nil }
       var label = "미확인 물체"
+      // Official COCO has no drone score. Do not feed it to the aerial3 margin
+      // policy, which intentionally rejects a missing competitor score.
+      if observed, let index = t.observedIndex, boxes[index].classScores?["drone"] == nil {
+        let b = boxes[index]
+        if b.conf >= 0.30, ["bird", "airplane"].contains(b.cls.lowercased()) {
+          label = b.cls.lowercased() == "bird" ? "새" : "비행기"
+        }
+      }
       if observed, t.score >= 0.30, t.hits >= 3, let scores = t.scores,
          let index = t.observedIndex, let current = boxes[index].aerialDisplayLabel {
         let winner = scores[0] >= scores[1] ? 0 : 1
@@ -215,6 +228,49 @@ final class AerialMotionTracker {
     if label == "드론" || label == "드론 의심" { return "drone" }
     if label == "새" || label == "새 의심" { return "bird" }
     return nil
+  }
+
+  /// Rectangular Hungarian assignment with one unmatched column per track.
+  /// Uses only geometrically gated edges; unmatched is cheaper than an invalid edge.
+  private static func assign(_ edges: [(Double, Int, Int)], tracks: [Int],
+                             detections: [Int]) -> [(Double, Int, Int)] {
+    guard !tracks.isEmpty, !detections.isEmpty else { return [] }
+    let n = tracks.count, m = detections.count + n
+    let rows = Dictionary(uniqueKeysWithValues: tracks.enumerated().map { ($0.element, $0.offset) })
+    let cols = Dictionary(uniqueKeysWithValues: detections.enumerated().map { ($0.element, $0.offset) })
+    var costs = Array(repeating: Array(repeating: 2.0, count: m), count: n)
+    for i in 0..<n { for j in 0..<detections.count { costs[i][j] = 1_000_000 } }
+    for e in edges { if let i = rows[e.1], let j = cols[e.2] { costs[i][j] = e.0 } }
+    var u = Array(repeating: 0.0, count: n+1), v = Array(repeating: 0.0, count: m+1)
+    var p = Array(repeating: 0, count: m+1), way = Array(repeating: 0, count: m+1)
+    for i in 1...n {
+      p[0] = i
+      var j0 = 0
+      var minimum = Array(repeating: Double.infinity, count: m+1)
+      var used = Array(repeating: false, count: m+1)
+      repeat {
+        used[j0] = true
+        let i0 = p[j0]
+        var delta = Double.infinity, j1 = 0
+        for j in 1...m where !used[j] {
+          let cost = costs[i0-1][j-1] - u[i0] - v[j]
+          if cost < minimum[j] { minimum[j] = cost; way[j] = j0 }
+          if minimum[j] < delta { delta = minimum[j]; j1 = j }
+        }
+        for j in 0...m {
+          if used[j] { u[p[j]] += delta; v[j] -= delta }
+          else { minimum[j] -= delta }
+        }
+        j0 = j1
+      } while p[j0] != 0
+      repeat {
+        let j1 = way[j0]; p[j0] = p[j1]; j0 = j1
+      } while j0 != 0
+    }
+    return (1...detections.count).compactMap { j in
+      guard p[j] > 0, costs[p[j]-1][j-1] < 2.0 else { return nil }
+      return (costs[p[j]-1][j-1], tracks[p[j]-1], detections[j-1])
+    }
   }
 
   private static func scores(_ b: Box) -> [Float]? {

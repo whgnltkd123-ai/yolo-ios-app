@@ -176,6 +176,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var previousAlertStage: DroneAlertStage = .none
   private let monitoringButton = UIButton(type: .system)
   private let recognitionModes = UISegmentedControl(items:["1 기존 모델", "2 객체인식", "3 보정추적"])
+  private var pendingRecognitionMode: AerialRecognitionMode?
   private let trackingStatus = UILabel()
   private var lastTrackingStatusUpdate = 0.0
   private var recordingPerformance = false
@@ -266,15 +267,31 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   @objc private func recognitionModeChanged() {
     let mode = AerialRecognitionMode(rawValue:recognitionModes.selectedSegmentIndex) ?? .original
-    guard mode == .original || (currentTask == "Detect" && currentModelName.contains("aerial3")) else {
+    guard !isLoadingModel else {
       recognitionModes.selectedSegmentIndex = yoloView.aerialRecognitionMode.rawValue
-      showMonitoringMessage("보강된 aerial3 모델을 먼저 선택해 주세요.")
       return
     }
+    let target = mode == .original ? "yolo26s-aerial3" : "yolo26s"
+    if currentTask != "Detect" || currentModelName.lowercased() != target {
+      guard let entry = makeModelEntries(for: "Detect").first(where: { $0.displayName == target }) else {
+        recognitionModes.selectedSegmentIndex = yoloView.aerialRecognitionMode.rawValue
+        showMonitoringMessage("선택한 모드의 모델을 찾을 수 없습니다.")
+        return
+      }
+      pendingRecognitionMode = mode
+      loadModel(entry: entry, forTask: "Detect")
+      return
+    }
+    applyRecognitionMode(mode)
+  }
+
+  private func applyRecognitionMode(_ mode: AerialRecognitionMode) {
+    recognitionModes.selectedSegmentIndex = mode.rawValue
     yoloView.aerialRecognitionMode = mode
+    if mode != .original { yoloView.showsOnlyAerialDetections = true }
     resetDroneCandidate()
     trackingStatus.text = mode == .original ? "기존 모델 · 추적/센서/보정 OFF"
-      : mode == .tracking ? "ID·누적 판정 ON · 카메라 보정 OFF" : "ID·누적 판정 ON · 자동 카메라 보정 ON"
+      : mode == .tracking ? "공식 YOLO26s · 새/비행기 ID · 드론 미지원" : "공식 YOLO26s · 새/비행기 ID · 자동 보정"
   }
 
   @objc private func toggleAerialBoxes() {
@@ -929,6 +946,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
     isLoadingModel = false
     currentLoadingEntry = nil
     currentLoadingTask = nil
+    pendingRecognitionMode = nil
+    recognitionModes.selectedSegmentIndex = yoloView.aerialRecognitionMode.rawValue
     resetDownloadProgress()
     restoreCurrentModelSelection()
 
@@ -950,11 +969,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
       if success {
         self.yoloView.capturesOriginalImage = self.evidenceEnabled && loadedTask == "Detect"
-        if loadedTask != "Detect" || !modelName.contains("aerial3") {
-          self.recognitionModes.selectedSegmentIndex = 0
-          self.yoloView.aerialRecognitionMode = .original
-          self.trackingStatus.text = "기존 모델 · 추적/센서/보정 OFF"
-        }
+        let mode = self.pendingRecognitionMode ?? .original
+        self.applyRecognitionMode(mode)
         let previousTask = self.currentTask
         self.currentTask = loadedTask
         if previousTask != loadedTask {
@@ -973,6 +989,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
         self.refreshModelButton()
       } else {
+        self.recognitionModes.selectedSegmentIndex = self.yoloView.aerialRecognitionMode.rawValue
         self.restoreCurrentModelSelection()
       }
 
@@ -1022,6 +1039,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
       }
       self.currentLoadingEntry = nil
       self.currentLoadingTask = nil
+      self.pendingRecognitionMode = nil
     }
   }
 
