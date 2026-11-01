@@ -16,10 +16,21 @@ let package = Package(
       targets: ["UltralyticsYOLO"])
   ],
   targets: [
+    .target(
+      name: "OfficialByteTrack",
+      exclude: ["upstream/LICENSE"],
+      sources: ["Bridge.cpp", "upstream/src"],
+      publicHeadersPath: "include",
+      cxxSettings: [
+        .headerSearchPath("upstream/include"),
+        .headerSearchPath("dependencies/eigen"),
+        .headerSearchPath("dependencies/opencv"),
+      ]),
     // Targets are the basic building blocks of a package, defining a module or a test suite.
     // Targets can depend on other targets in this package and products from dependencies.
     .target(
       name: "UltralyticsYOLO",
+      dependencies: ["OfficialByteTrack"],
       exclude: ["README.md"]),
     .testTarget(
       name: "YOLOTests",
@@ -35,5 +46,6 @@ let package = Package(
         .copy("Resources/yolo26n-sem.mlpackage"),
       ]
     ),
-  ]
+  ],
+  cxxLanguageStandard: .cxx14
 )

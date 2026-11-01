@@ -19,7 +19,7 @@ final class MotionTrackingTests: XCTestCase {
     let predicted = tracker.update(boxes:[],time:1.15)
     XCTAssertFalse(predicted.first?.observed ?? true)
     XCTAssertNil(predicted.first?.detectionIndex)
-    XCTAssertEqual(predicted.first?.label,"예측 유지")
+    XCTAssertEqual(predicted.first?.label,"관측 끊김")
     XCTAssertTrue(tracker.update(boxes:[],time:2).isEmpty)
     XCTAssertTrue(AerialMotionTracker().update(boxes:[box(0.2,score:0.2)],time:1).isEmpty)
   }
@@ -61,45 +61,41 @@ final class MotionTrackingTests: XCTestCase {
       processingMS:0,latencyMS:0,thermalState:0)
     XCTAssertNil(result.confirmedAerialDrone)
   }
-  func testTinyNonOverlappingBoxesAndBriefGapKeepIdentity() {
+  func testOfficialWeakDetectionsRescueButDoNotStartIDs() {
     let tracker = AerialMotionTracker()
-    func tiny(_ x: CGFloat, _ score: Float = 0.8) -> Box {
-      let r = CGRect(x:x,y:0.3,width:0.006,height:0.006)
-      return Box(index:0,cls:"drone",conf:score,xywh:r,xywhn:r,
-        classScores:["drone":score,"bird":0.01,"airplane":0.01])
+    for i in 0..<10 {
+      XCTAssertTrue(tracker.update(boxes:[box(0.2,score:0.3)],time:1+Double(i)*0.05).isEmpty)
     }
-    let id = tracker.update(boxes:[tiny(0.2)],time:1).first?.id
-    XCTAssertEqual(tracker.update(boxes:[tiny(0.208)],time:1.05).first?.id,id)
-    _ = tracker.update(boxes:[],time:1.3)
-    XCTAssertEqual(tracker.update(boxes:[tiny(0.21)],time:1.6).first?.id,id)
-    let weak = AerialMotionTracker()
-    XCTAssertTrue(weak.update(boxes:[tiny(0.2,0.2)],time:1).isEmpty)
-    XCTAssertTrue(weak.update(boxes:[tiny(0.201,0.2)],time:1.1).isEmpty)
-    let candidate = weak.update(boxes:[tiny(0.202,0.2)],time:1.2)
-    XCTAssertEqual(candidate.first?.label,box(0.2,score:0.2).aerialDisplayLabel)
-    XCTAssertEqual(candidate.first?.observed,true)
-    XCTAssertNotNil(candidate.first?.detectionIndex)
-  }
-  func testNearbyAmbiguousObjectsAreNotForcedIntoOneID() {
-    let tracker = AerialMotionTracker()
-    _ = tracker.update(boxes:[box(0.2)],time:1)
-    let ambiguous = tracker.update(boxes:[box(0.19),box(0.21)],time:1.05)
-    XCTAssertFalse(ambiguous.contains { $0.observed })
-  }
-  func testStationaryTinySizeJitterAndDisruptionPreserveIdentity() {
-    let tracker = AerialMotionTracker()
-    var id: Int?
-    for i in 0..<40 {
-      let size: CGFloat = i % 2 == 0 ? 0.002 : 0.008
-      let r = CGRect(x:0.3-size/2,y:0.3-size/2,width:size,height:size)
-      let b = Box(index:0,cls:"drone",conf:0.8,xywh:r,xywhn:r,
-        classScores:["drone":0.8,"bird":0.01,"airplane":0.01])
-      let output = tracker.update(boxes:[b],time:1+Double(i)*0.1,disrupted:i == 20)
-      if i == 0 { id = output.first?.id }
+    let initialized = AerialMotionTracker()
+    let id = initialized.update(boxes:[box(0.2)],time:1).first?.id
+    XCTAssertNotNil(id)
+    for i in 1..<15 {
+      let output = initialized.update(boxes:[box(0.2+CGFloat(i)*0.001,score:0.3)],
+                                      time:1+Double(i)*0.05)
       XCTAssertEqual(output.first?.id,id)
-      XCTAssertEqual(output.first?.observed,true)
-      if i == 20 { XCTAssertEqual(output.first?.label,"미확인 물체") }
+      XCTAssertTrue(output.first?.observed == true)
     }
+  }
+
+  func testStationaryObjectAndShortOcclusionKeepOfficialID() {
+    let tracker = AerialMotionTracker()
+    let id = tracker.update(boxes:[box(0.2)],time:1).first?.id
+    XCTAssertNotNil(id)
+    for i in 1..<10 {
+      XCTAssertEqual(tracker.update(boxes:[box(0.2)],time:1+Double(i)*0.05).first?.id,id)
+    }
+    _ = tracker.update(boxes:[],time:1.5)
+    _ = tracker.update(boxes:[],time:1.55)
+    XCTAssertEqual(tracker.update(boxes:[box(0.2)],time:1.6).first?.id,id)
+  }
+
+  func testNativeAssignmentReturnsCorrectDetectionIndexAfterReordering() {
+    let tracker = AerialMotionTracker()
+    let first = tracker.update(boxes:[box(0.1),box(0.7)],time:1)
+    XCTAssertEqual(first.count,2)
+    let second = tracker.update(boxes:[box(0.7),box(0.1)],time:1.05)
+    XCTAssertEqual(second.first(where:{$0.id == first[0].id})?.detectionIndex,1)
+    XCTAssertEqual(second.first(where:{$0.id == first[1].id})?.detectionIndex,0)
   }
 
   func testWarningStagesRespectObservedTrackingDecisions() {
