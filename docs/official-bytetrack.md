@@ -21,3 +21,5 @@ Validation pending: native C++ smoke, iOS Simulator decisions/IDs, device build.
 Deployment gate: same footage baseline vs new in modes1/2/3, report actual camera/AI FPS, p95 latency, ID switches and false merges. Do not assert unchanged speed from a successful build.
 
 Platform exception: the upstream rectangular-cost error branch used desktop system(pause)/exit. It now throws invalid_argument; the C ABI catches exceptions and Swift resets the failed engine. Normal assignment is unchanged. Unassigned detector candidates >=.30 remain visible without an ID; they are not counted as tracker births. Native macOS smoke passed at 5d84894; iOS verification remains pending.
+
+Follow-up: app-wide .30 prefilter previously prevented official weak-association below .30. Modes2/3 now request .10 from the same decoder, mode1 stays .30. Upstream .6 births and UI .30/.60 remain unchanged; unmatched <.30 observations are not displayed as new candidates. Model reload honors current mode. This is weak-track continuity, not proof of new-object recall; extra decoded candidates require device performance measurement.

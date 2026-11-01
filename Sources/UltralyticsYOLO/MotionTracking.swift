@@ -4,6 +4,8 @@ import OfficialByteTrack
 
 public enum AerialRecognitionMode: Int, Sendable {
   case original = 0, tracking = 1, compensatedTracking = 2
+  /// Weak observations reach ByteTrack; display and new-ID thresholds stay separate.
+  public var detectorConfidenceThreshold: Double { self == .original ? 0.30 : 0.10 }
 }
 public struct TrackedAerialObject: Sendable {
   /// Positive: official tracker ID. Zero: observed detector candidate without an ID.

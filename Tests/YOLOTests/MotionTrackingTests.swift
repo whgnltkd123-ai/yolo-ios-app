@@ -7,6 +7,11 @@ final class MotionTrackingTests: XCTestCase {
     return Box(index:0,cls:"drone",conf:score,xywh:rect,xywhn:rect,
       classScores:["drone":score,"bird":bird,"airplane":0.01])
   }
+  func testModeSpecificCandidateFloorPreservesOriginalMode() {
+    XCTAssertEqual(AerialRecognitionMode.original.detectorConfidenceThreshold,0.30)
+    XCTAssertEqual(AerialRecognitionMode.tracking.detectorConfidenceThreshold,0.10)
+    XCTAssertEqual(AerialRecognitionMode.compensatedTracking.detectorConfidenceThreshold,0.10)
+  }
   func testIDAndLowScoreRescueDoNotCreateNewDetections() {
     let tracker = AerialMotionTracker()
     let a = tracker.update(boxes:[box(0.2)],time:1)

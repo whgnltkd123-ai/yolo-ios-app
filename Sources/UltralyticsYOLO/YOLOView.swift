@@ -124,6 +124,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   /// Mode 1 is the unchanged detector; 2 adds IDs; 3 additionally compensates camera motion.
   public var aerialRecognitionMode: AerialRecognitionMode = .original {
     didSet {
+      setConfidenceThreshold(aerialRecognitionMode.detectorConfidenceThreshold)
       videoCapture.setRecognitionMode(aerialRecognitionMode)
       boundingBoxViews.forEach { $0.hide() }
     }
