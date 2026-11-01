@@ -1,16 +1,9 @@
-# Three-class build checkpoint
+# Balanced flight YOLO26s
 
-This is the latest completed 15-epoch reinforcement from the original app checkpoint, Kaggle run362771654. Class order is drone, bird, airplane. It does not include the separate 50-epoch MBAOD job still running when the user requested this installation.
+`best.pt` is the fixed final (LAST) checkpoint from balanced-flight recovery run 364227993, retained under the existing build input name. SHA256: c7df126a039c1edde8d6b3e0c78be99f43e6770913eb1ff201976e2cf2505d26.
 
-- Bundled SHA256: `f1701e53e9952b9cfc3726fb118d3f718de2908973a5021dff90731db1b23b0e`.
-- Original parent SHA256: `024b3ba7a552a9b52a88cb6de05cf6c2927b8db242ae2d792c215d602e450371`.
-- Sources: 15,206 frozen Seraphim/COCO/MIT replay images, 646 reviewed LAT RGB bird frames and 936 USC MCL RGB drone frames; 16,788 unique images. Weighted repeats are not additional unique images.
-- Original and earlier checkpoints remain in Git history and verified workspace backups. No unrelated weights were merged. Personal videos were not used for training.
+Public 270: confirmed drone TP63 FP5/98, bird TP63 FP36/102, airplane TP38 FP0/90. Background71 includes one confirmed drone false positive. Full accuracy gate FAILED. User requested application with disclosed limitations. Public160-frame replacement video evaluation completed; private292 unavailable and not evaluated.
 
-The preserved legacy diagnostic failed the planned accuracy gates: drone10TP/33FP/98GT at.70; bird0TP/0FP/102GT at.60; airplane21TP/9FP/90GT at.60. Background71 and private292 had no high-score drone detections. The user requested installing the latest completed model with the new decision policy. No accuracy improvement is asserted.
+Native display: suspicion >=0.30, confirmed >=0.60, same-anchor margin strictly >0.20; another aerial class >=0.30 or invalid/missing drone/bird scores => unknown. Scores are not calibrated probabilities. No tracking. Below detector threshold produces no fabricated box.
 
-The app uses suspicion40, confirmation60 for both bird and drone, and a strictly greater than20 percentage-point difference between the same detection's two class scores. Equal20 or missing scores remains unidentified. Consecutive observations are required before confirmation. The legacy diagnostic is preserved separately and does not measure this new app policy. Model scores are not calibrated probabilities.
-
-The build verifies checkpoint SHA and class order, exports Core ML at640 with same-anchor class scores, compares numeric output on three deterministic public frames, builds the native app and runs simulator tracking/decision checks. This is not physical-device or accuracy validation. The three conversion inputs are full public CC0 frames, not GT crops or personal videos.
-
-LAT material retains CC BY-NC-SA4.0 terms. This packaging does not establish permission for commercial distribution. Static-frame training and the experimental motion veto do not demonstrate temporal wingbeat recognition or independent field performance.
+See aerial-validation.json. 300m, iPhone15 FPS and device accuracy remain unverified. CoreML conversion must verify checkpoint hash and 3-class same-anchor output parity before packaging.
