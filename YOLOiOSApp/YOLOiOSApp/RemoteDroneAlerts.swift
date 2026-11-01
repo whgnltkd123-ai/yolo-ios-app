@@ -15,7 +15,6 @@ final class RemoteDroneAlerts: NSObject, UNUserNotificationCenterDelegate {
   private var membership: Membership?
   private var deviceToken: String?
   private var lastPublished = -Double.infinity
-  private var lastPublishedTrack: [Int: Double] = [:]
   private var publishing = false
   var statusChanged: ((String) -> Void)?
   private(set) var status = "가입자 알림 미연결" {
@@ -130,17 +129,14 @@ final class RemoteDroneAlerts: NSObject, UNUserNotificationCenterDelegate {
     status = "가입자 알림 해제됨"
   }
 
-  func publish(trackID: Int, score: Float) {
+  func publish(score: Float) {
     let now = CACurrentMediaTime()
     guard let membership, membership.canPublish, !publishing,
-      score >= 0.60, now - lastPublished >= 10,
-      now - (lastPublishedTrack[trackID] ?? -.infinity) >= 60
+      score >= 0.60, now - lastPublished >= 60
     else { return }
     publishing = true
     // Bound attempts even offline; this is a live alert, never replay a stale warning later.
     lastPublished = now
-    lastPublishedTrack[trackID] = now
-    lastPublishedTrack = lastPublishedTrack.filter { now - $0.value < 600 }
     let id = UUID().uuidString
     Task {
       defer { publishing = false }

@@ -26,7 +26,10 @@ from pathlib import Path
 import certifi
 from ultralytics import YOLO
 
-DEST = Path("YOLOiOSApp/Models/Detect/yolo26n-aerial3.mlpackage")
+SCALE = os.environ.get("YOLO26_DRONE_SCALE", "n")
+if SCALE not in ("n", "s"):
+    raise ValueError("YOLO26_DRONE_SCALE must be n or s")
+DEST = Path(f"YOLOiOSApp/Models/Detect/yolo26{SCALE}-aerial3.mlpackage")
 SCORE_SCHEMA = "xyxy_conf_class_drone_bird_airplane_v1"
 
 
@@ -186,6 +189,8 @@ def main():
     weights = download_verified_weights()
     # IMPORTANT: loading .pt files runs pickle-related parsing; ONLY YOUR OWN weights.
     model = YOLO(str(weights))
+    if model.model.yaml.get("scale") != SCALE:
+        raise SystemExit(f"Expected YOLO26{SCALE} scale; refusing a renamed or incompatible checkpoint")
     if model.task != "detect":
         raise SystemExit(f"Expected a detection checkpoint, got: {model.task}")
     labels = [str(model.names[i]).strip().lower() for i in sorted(model.names)]

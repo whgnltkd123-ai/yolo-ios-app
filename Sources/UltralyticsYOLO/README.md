@@ -56,7 +56,7 @@ Alternatively, declare the dependency in your own `Package.swift`:
 ```swift
 // In your Package.swift dependencies array
 dependencies: [
-    .package(url: "https://github.com/ultralytics/yolo-ios-app.git", from: "8.9.16")
+    .package(url: "https://github.com/ultralytics/yolo-ios-app.git", from: "8.9.17")
 ]
 
 // In your target's dependencies
@@ -169,6 +169,19 @@ Depth estimation stretches the whole image to the model input, matching Ultralyt
 `DepthMap.width` and `height` are the model output dimensions (640×640 for official models); the full map covers the
 original image without cropped padding. Scale it to the original image dimensions when mapping pixels to depth.
 
+To run one function of a multifunction model, such as several input sizes merged into one package with coremltools'
+`MultiFunctionDescriptor`, create the predictor with `functionName`. `nil` loads the default function (`main` for Core
+AI). Core ML needs iOS 18 or later to select a function and fails with `PredictorError.functionNameUnavailable` on
+earlier versions.
+
+```swift
+BasePredictor.create(for: .detect, modelURL: modelURL, functionName: "landscape") { result in
+    guard case .success(let predictor) = result, let image = CIImage(image: uiImage) else { return }
+    let output: YOLOResult = predictor.predictOnImage(image: image)
+    print(output.boxes.count)
+}
+```
+
 ### YOLOCamera / YOLOView (Real-Time Camera Inference)
 
 The package provides convenient SwiftUI (`YOLOCamera`) and UIKit (`YOLOView`) components for real-time inference using the device's camera stream. Add these views to your layout, and they handle the camera input and on-device model inference automatically.
@@ -258,6 +271,12 @@ class CameraViewController: UIViewController {
 ```
 
 With just a few lines of code, you can integrate real-time, YOLO-based inference into your application's camera feed. For more advanced use cases, explore the customization options available for these components.
+
+`YOLOView.scanQRCode(completion:)` reads one QR value from the existing camera stream while model inference pauses. `cancelQRCodeScan()` completes with `nil`; both completion paths return the same preview to live inference, including when scanning started from a paused preview. The shared `QRCodeScan` decoder also serves the Flutter camera owner.
+
+Buttons added to `YOLOView.toolbar` are laid out after Share; every button gets an equal slot, with Info last and play/pause sharing one slot.
+
+A failed `YOLOView.setModel` keeps the current predictor, task, model name, and overlay configuration. Replacement state is committed only after the new predictor loads successfully.
 
 ## ⚙️ How to Obtain YOLO Core ML Models
 

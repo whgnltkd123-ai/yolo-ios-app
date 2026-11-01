@@ -119,13 +119,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
 
   public var onDetection: ((YOLOResult) -> Void)?
 
-  /// Changes when camera projection changes; consumers must not carry object IDs across it.
-  public var trackingCameraContext: String {
-    let device = videoCapture.captureDevice
-    return "\(device?.uniqueID ?? "none"):\(device?.videoZoomFactor ?? 1):\(modelName)"
-  }
-
-  /// Opt-in source frames for consumers performing temporal image analysis.
+  /// Opt-in source frames for evidence capture.
   public var capturesOriginalImage = false {
     didSet {
       (videoCapture.predictor as? BasePredictor)?.capturesOriginalImage = capturesOriginalImage
@@ -260,21 +254,11 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     }
 
     activityIndicator.startAnimating()
-    boundingBoxViews.forEach { box in
-      box.hide()
-    }
-    removeClassificationLayers()
-
-    self.task = task
-    setupSublayers()
-
     guard let modelURL = ModelPathResolver.resolve(modelPathOrName) else {
       activityIndicator.stopAnimating()
       completion?(.failure(PredictorError.modelFileNotFound))
       return
     }
-
-    modelName = modelURL.deletingPathExtension().lastPathComponent
 
     BasePredictor.create(for: task, modelURL: modelURL, isRealTime: true) {
       @Sendable [weak self] result in
@@ -284,6 +268,11 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
         switch result {
         case .success(let predictor):
           predictor.capturesOriginalImage = self.capturesOriginalImage
+          self.boundingBoxViews.forEach { $0.hide() }
+          self.removeClassificationLayers()
+          self.task = task
+          self.setupSublayers()
+          self.modelName = modelURL.deletingPathExtension().lastPathComponent
           self.videoCapture.predictor = predictor
           predictor.setNumItemsThreshold(numItems: self.getNumItemsThreshold())
           self.labelName.text = processString(self.modelName)
@@ -348,6 +337,16 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     }
   }
 
+  /// Reads one QR code from the current camera stream without replacing its session or preview.
+  public func scanQRCode(
+    completion: @escaping @MainActor @Sendable (Result<String?, Error>) -> Void
+  ) {
+    videoCapture.scanQRCode(completion: completion)
+    resume()
+  }
+
+  public func cancelQRCodeScan() { videoCapture.cancelQRCodeScan() }
+
   public func stop() {
     // Stopping the capture session turns the hardware torch off; keep the chip truthful.
     setTorchUI(on: false)
@@ -358,6 +357,10 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     pausedShareImage = nil
     removePausedImage()
     videoCapture.start()
+    playButton.isEnabled = false
+    pauseButton.isEnabled = true
+    playButton.isHidden = true
+    pauseButton.isHidden = false
   }
 
   // MARK: - Threshold Configuration Methods
@@ -378,7 +381,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   public func setConfidenceThreshold(_ confidence: Double) {
     guard validateUnitRange(confidence, name: "Confidence threshold") else { return }
     sliderConf.value = Float(confidence)
-    labelSliderConf.text = String(format: "%.2f Confidence Threshold", confidence)
+    renderThresholdLabels()
     (videoCapture.predictor as? BasePredictor)?.setConfidenceThreshold(confidence: confidence)
   }
 
@@ -391,7 +394,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   public func setIouThreshold(_ iou: Double) {
     guard validateUnitRange(iou, name: "IoU threshold") else { return }
     sliderIoU.value = Float(iou)
-    labelSliderIoU.text = String(format: "%.2f IoU Threshold", iou)
+    renderThresholdLabels()
     (videoCapture.predictor as? BasePredictor)?.setIouThreshold(iou: iou)
   }
 
@@ -507,8 +510,6 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   func showBoxes(predictions: YOLOResult) {
     // Iterate directly without constructing a filtered array on every frame.
     // Inference still evaluates every class provided by the selected model.
-    let isBirdDroneModel =
-      modelName.lowercased().contains("birddrone") || modelName.lowercased().contains("drone81")
     let maxVisible = min(50, boundingBoxViews.count)
     let viewSize = bounds.size
     var shown = 0
@@ -517,14 +518,6 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       if shown >= maxVisible { break }
       if task == .detect && showsOnlyAerialDetections
         && !isAerialDetectionClass(prediction.cls)
-      {
-        continue
-      }
-      // Suppress particularly weak speck detections in the legacy test model.
-      if isBirdDroneModel
-        && prediction.cls.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "drone"
-        && (prediction.conf < 0.40
-          || min(prediction.xywhn.width, prediction.xywhn.height) < 0.004)
       {
         continue
       }
@@ -580,11 +573,10 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   private func showBox(at index: Int, prediction: Box, frame: CGRect) {
     showBox(
       at: index,
-      className: prediction.cls,
+      className: prediction.aerialDisplayLabel ?? prediction.cls,
       confidence: CGFloat(prediction.conf),
       classIndex: prediction.index,
-      frame: frame,
-      smallTarget: min(prediction.xywhn.width, prediction.xywhn.height) < 0.02
+      frame: frame
     )
   }
 
@@ -595,46 +587,17 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     confidence: CGFloat,
     classIndex: Int,
     frame: CGRect,
-    smallTarget: Bool = false,
     angle: CGFloat? = nil
   ) {
-    // Bird/drone separation is visible immediately; all other classes retain original YOLO colors.
-    let normalizedClass = className.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let birdClasses: Set<String> = ["bird", "birds"]
-    let airplaneClasses: Set<String> = ["airplane", "aeroplane", "plane"]
-    let droneClasses: Set<String> = [
-      "drone", "drones", "uav", "uas", "quadcopter", "multicopter",
-      "fpv drone", "fpv-drone", "unmanned aerial vehicle", "fixed-wing", "fixed wing",
-    ]
-    let isDroneLabel =
-      droneClasses.contains(normalizedClass)
-      || normalizedClass.hasPrefix("drone ") || normalizedClass.hasSuffix(" drone")
-    let isUncertain =
-      (birdClasses.contains(normalizedClass)
-        || airplaneClasses.contains(normalizedClass) || isDroneLabel)
-      && (confidence < (isDroneLabel ? 0.70 : 0.60) || (isDroneLabel && smallTarget))
-    let color: UIColor =
-      isUncertain
-      ? .systemYellow
-      : birdClasses.contains(normalizedClass)
-        ? .systemGreen
-        : airplaneClasses.contains(normalizedClass)
-          ? .systemBlue
-          : isDroneLabel
-            ? .systemRed
-            : ultralyticsColors[classIndex % ultralyticsColors.count]
-    // These are single-frame scores, not independently confirmed identities.
-    let localizedClass =
-      isUncertain
-      ? "미확인 물체"
-      : birdClasses.contains(normalizedClass)
-        ? "새"
-        : airplaneClasses.contains(normalizedClass)
-          ? "비행기 후보"
-          : isDroneLabel
-            ? "드론"
-            : className
-    let label = DetectionLabelStyle.text(className: localizedClass, confidence: confidence)
+    let color: UIColor
+    switch className {
+    case "드론": color = .systemRed
+    case "새": color = .systemGreen
+    case "비행기": color = .systemBlue
+    case "드론 의심", "새 의심", "미확인 물체": color = .systemYellow
+    default: color = ultralyticsColors[classIndex % ultralyticsColors.count]
+    }
+    let label = DetectionLabelStyle.text(className: className, confidence: confidence)
     let alpha = DetectionLabelStyle.alpha(confidence: confidence)
     boundingBoxViews[index].show(
       frame: frame, label: label, color: color, alpha: alpha, angle: angle)
@@ -735,26 +698,18 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     configureSlider(sliderNumItems, min: 1, max: 100, value: Float(defaultMaxDetectionItems))
     sliderNumItems.isHidden = true
 
-    labelSliderConf.text = "0.25 Confidence Threshold"
-    labelSliderConf.textAlignment = .left
-    labelSliderConf.textColor = .white
     labelSliderConf.font = UIFont.preferredFont(forTextStyle: .subheadline)
     self.addSubview(labelSliderConf)
 
     configureSlider(sliderConf, min: 0, max: 1, value: 0.25)
     self.addSubview(sliderConf)
 
-    labelSliderIoU.text = "0.70 IoU Threshold"
-    labelSliderIoU.textAlignment = .left
-    labelSliderIoU.textColor = .white
     labelSliderIoU.font = UIFont.preferredFont(forTextStyle: .subheadline)
     self.addSubview(labelSliderIoU)
 
     configureSlider(sliderIoU, min: 0, max: 1, value: 0.7)
     self.addSubview(sliderIoU)
-
-    self.labelSliderConf.text = "0.25 Confidence Threshold"
-    self.labelSliderIoU.text = "0.70 IoU Threshold"
+    renderThresholdLabels()
 
     labelZoom.text = "1.00x"
     labelZoom.textColor = .white
@@ -775,6 +730,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     infoButton.accessibilityLabel = "Ultralytics"
     playButton.isEnabled = false
     pauseButton.isEnabled = true
+    playButton.isHidden = true
     playButton.addTarget(self, action: #selector(playTapped), for: .touchUpInside)
     pauseButton.addTarget(self, action: #selector(pauseTapped), for: .touchUpInside)
     switchCameraButton.addTarget(self, action: #selector(switchCameraTapped), for: .touchUpInside)
@@ -808,18 +764,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
 
   private func setupLensControl() {
     lensControl.isHidden = true
-    lensControl.backgroundColor = UIColor.black.withAlphaComponent(0.38)
-    lensControl.selectedSegmentTintColor = UIColor.white.withAlphaComponent(0.18)
-    lensControl.setTitleTextAttributes(
-      [
-        .foregroundColor: UIColor.white,
-        .font: UIFont.systemFont(ofSize: 13, weight: .semibold),
-      ], for: .normal)
-    lensControl.setTitleTextAttributes(
-      [
-        .foregroundColor: UIColor.systemYellow,
-        .font: UIFont.systemFont(ofSize: 13, weight: .bold),
-      ], for: .selected)
+    lensControl.applyCameraStyle()
     lensControl.addTarget(self, action: #selector(lensChanged(_:)), for: .valueChanged)
     self.addSubview(lensControl)
 
@@ -891,43 +836,9 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       x: 0, y: labelFPS.frame.maxY, width: width, height: subLabelHeight * 0.8
     )
 
-    let sliderWidth: CGFloat = width * 0.2
-    let sliderHeight: CGFloat = height * 0.06
-
-    let bottomMargin: CGFloat = lensControl.isHidden ? 80 : 144
-    let totalSliderHeight = (sliderHeight + 3) * 6
-    let startY = height - bottomMargin - totalSliderHeight
-
-    let thresholdStartY = startY + (sliderHeight + 3) * 2 + 10
-
-    labelSliderConf.frame = CGRect(
-      x: width * 0.1, y: thresholdStartY,
-      width: sliderWidth * 1.5, height: sliderHeight
-    )
-
-    sliderConf.frame = CGRect(
-      x: width * 0.1, y: labelSliderConf.frame.maxY + 3,
-      width: sliderWidth, height: sliderHeight
-    )
-
-    labelSliderIoU.frame = CGRect(
-      x: width * 0.1, y: sliderConf.frame.maxY + 3,
-      width: sliderWidth * 1.5, height: sliderHeight
-    )
-
-    sliderIoU.frame = CGRect(
-      x: width * 0.1, y: labelSliderIoU.frame.maxY + 3,
-      width: sliderWidth, height: sliderHeight
-    )
-
-    let zoomLabelWidth: CGFloat = width * 0.2
-    labelZoom.frame = CGRect(
-      x: center.x - zoomLabelWidth / 2, y: self.bounds.maxY - 120,
-      width: zoomLabelWidth, height: height * 0.03
-    )
-
-    layoutToolbarButtons(width: width, height: height)
-    layoutLensControl(width: width, height: height)
+    layoutBottomControls(
+      width: width, height: height, sliderX: width * 0.1,
+      sliderWidth: min(max(width * 0.28, 220), 300))
   }
 
   /// Lays out the controls and overlays for portrait orientation.
@@ -948,64 +859,73 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       x: 0, y: labelFPS.frame.maxY, width: width, height: subLabelHeight * 0.8
     )
 
-    let sliderWidth: CGFloat = width * 0.46
-    let sliderHeight: CGFloat = height * 0.02
-    let leftPadding: CGFloat = 20
-
-    let cameraControlsOffset: CGFloat = lensControl.isHidden ? 0 : 64
-    let thresholdStartY =
-      center.y + height * 0.16 + sliderHeight * 2 + 40 - cameraControlsOffset
-
-    labelSliderConf.frame = CGRect(
-      x: leftPadding, y: thresholdStartY,
-      width: sliderWidth * 1.5, height: sliderHeight
-    )
-
-    sliderConf.frame = CGRect(
-      x: leftPadding, y: labelSliderConf.frame.maxY + 10,
-      width: sliderWidth, height: sliderHeight
-    )
-
-    labelSliderIoU.frame = CGRect(
-      x: leftPadding, y: sliderConf.frame.maxY + 10,
-      width: sliderWidth * 1.5, height: sliderHeight
-    )
-
-    sliderIoU.frame = CGRect(
-      x: leftPadding, y: labelSliderIoU.frame.maxY + 10,
-      width: sliderWidth, height: sliderHeight
-    )
-
-    let zoomLabelWidth: CGFloat = width * 0.2
-    labelZoom.frame = CGRect(
-      x: center.x - zoomLabelWidth / 2, y: self.bounds.maxY - 120,
-      width: zoomLabelWidth, height: height * 0.03
-    )
-
-    layoutToolbarButtons(width: width, height: height)
-    layoutLensControl(width: width, height: height)
+    layoutBottomControls(width: width, height: height, sliderX: 20, sliderWidth: width * 0.46)
   }
 
-  /// Lays out toolbar buttons; shared between portrait and landscape layouts.
+  /// Lays out the toolbar, the zoom row above it (or the lens controls), then stacks the threshold labels and sliders
+  /// upward from that row so they never overlap it; shared between portrait and landscape layouts.
+  private func layoutBottomControls(
+    width: CGFloat, height: CGFloat, sliderX: CGFloat, sliderWidth: CGFloat
+  ) {
+    layoutToolbarButtons(width: width, height: height)
+    labelZoom.frame = CGRect(x: width / 2 - 50, y: toolbar.frame.minY - 26, width: 100, height: 18)
+    layoutLensControl(width: width, height: height)
+
+    let labelHeight = ceil(labelSliderConf.font.lineHeight)
+    let sliderHeight: CGFloat = 30
+    let iouY = labelZoom.frame.minY - 12 - sliderHeight
+    let confY = iouY - labelHeight - 2 - 10 - sliderHeight
+    labelSliderConf.frame = CGRect(
+      x: sliderX, y: confY - labelHeight - 2, width: sliderWidth, height: labelHeight)
+    sliderConf.frame = CGRect(x: sliderX, y: confY, width: sliderWidth, height: sliderHeight)
+    labelSliderIoU.frame = CGRect(
+      x: sliderX, y: iouY - labelHeight - 2, width: sliderWidth, height: labelHeight)
+    sliderIoU.frame = CGRect(x: sliderX, y: iouY, width: sliderWidth, height: sliderHeight)
+    renderThresholdLabels()
+  }
+
+  /// Threshold name on the left and its value right-aligned at the slider's trailing edge, as in the Flutter showcase.
+  private func renderThresholdLabels() {
+    for (label, name, value) in [
+      (labelSliderConf, "Confidence", sliderConf.value), (labelSliderIoU, "IoU", sliderIoU.value),
+    ] {
+      let paragraph = NSMutableParagraphStyle()
+      paragraph.tabStops = [
+        NSTextTab(textAlignment: .right, location: max(label.bounds.width - 1, 0))
+      ]
+      let text = NSMutableAttributedString(
+        string: name + "\t",
+        attributes: [
+          .foregroundColor: UIColor.white.withAlphaComponent(0.62), .paragraphStyle: paragraph,
+        ])
+      text.append(
+        NSAttributedString(
+          string: String(format: "%.2f", value),
+          attributes: [
+            .foregroundColor: UIColor.white, .paragraphStyle: paragraph,
+            .font: UIFont.monospacedDigitSystemFont(ofSize: label.font.pointSize, weight: .medium),
+          ]))
+      label.attributedText = text
+    }
+  }
+
+  /// Gives every toolbar button an equal slot; play and pause share one because only one of them is visible.
   private func layoutToolbarButtons(width: CGFloat, height: CGFloat) {
     let toolBarHeight: CGFloat = 66
     let buttonHeight: CGFloat = toolBarHeight * 0.75
-    let horizontalInset = buttonHeight * 0.25
 
     toolbar.frame = CGRect(x: 0, y: height - toolBarHeight, width: width, height: toolBarHeight)
-    playButton.frame = CGRect(x: horizontalInset, y: 0, width: buttonHeight, height: buttonHeight)
-    pauseButton.frame = CGRect(
-      x: playButton.frame.maxX, y: 0, width: buttonHeight, height: buttonHeight
-    )
-    switchCameraButton.frame = CGRect(
-      x: pauseButton.frame.maxX, y: 0, width: buttonHeight, height: buttonHeight
-    )
-    shareButton.frame = CGRect(
-      x: switchCameraButton.frame.maxX, y: 0, width: buttonHeight, height: buttonHeight
-    )
-    infoButton.frame = CGRect(
-      x: width - buttonHeight - horizontalInset, y: 0, width: buttonHeight, height: buttonHeight
-    )
+    let buttons =
+      toolbar.subviews.compactMap { $0 as? UIButton }.filter {
+        $0 !== playButton && $0 !== infoButton
+      } + [infoButton]
+    let slot = width / CGFloat(buttons.count)
+    for (index, button) in buttons.enumerated() {
+      button.frame = CGRect(
+        x: slot * (CGFloat(index) + 0.5) - buttonHeight / 2, y: 0, width: buttonHeight,
+        height: buttonHeight)
+    }
+    playButton.frame = pauseButton.frame
   }
 
   private func layoutLensControl(width: CGFloat, height: CGFloat) {
@@ -1089,11 +1009,11 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       predictor?.setNumItemsThreshold(numItems: numItems)
     } else if slider === sliderConf {
       let conf = Double(round(100 * sliderConf.value)) / 100
-      self.labelSliderConf.text = String(format: "%.2f Confidence Threshold", conf)
+      renderThresholdLabels()
       predictor?.setConfidenceThreshold(confidence: conf)
     } else if slider === sliderIoU {
       let iou = Double(round(100 * sliderIoU.value)) / 100
-      self.labelSliderIoU.text = String(format: "%.2f IoU Threshold", iou)
+      renderThresholdLabels()
       predictor?.setIouThreshold(iou: iou)
     }
   }
@@ -1103,8 +1023,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     sliderConf.value = Float(conf)
     sliderIoU.value = Float(iou)
     sliderNumItems.value = Float(numItems)
-    self.labelSliderConf.text = String(format: "%.2f Confidence Threshold", conf)
-    self.labelSliderIoU.text = String(format: "%.2f IoU Threshold", iou)
+    renderThresholdLabels()
 
     if let predictor = videoCapture.predictor as? BasePredictor {
       predictor.setConfidenceThreshold(confidence: conf)
@@ -1198,11 +1117,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
 
   @objc func playTapped() {
     selection.selectionChanged()
-    pausedShareImage = nil
-    removePausedImage()
-    self.videoCapture.start()
-    playButton.isEnabled = false
-    pauseButton.isEnabled = true
+    resume()
   }
 
   @objc func pauseTapped() {
@@ -1219,6 +1134,8 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       self?.pausedShareImage = image
       self?.showPausedImage(image)
       self?.playButton.isEnabled = true
+      self?.playButton.isHidden = false
+      self?.pauseButton.isHidden = true
     }
   }
 
@@ -1593,4 +1510,20 @@ public func processString(_ input: String) -> String {
   }
 
   return output
+}
+
+extension UISegmentedControl {
+  /// Camera HUD segment style shared by the lens picker and host controls such as the app's model sizes.
+  public func applyCameraStyle() {
+    backgroundColor = UIColor.black.withAlphaComponent(0.38)
+    selectedSegmentTintColor = UIColor.white.withAlphaComponent(0.18)
+    setTitleTextAttributes(
+      [.foregroundColor: UIColor.white, .font: UIFont.systemFont(ofSize: 13, weight: .semibold)],
+      for: .normal)
+    setTitleTextAttributes(
+      [
+        .foregroundColor: UIColor.systemYellow, .font: UIFont.systemFont(ofSize: 13, weight: .bold),
+      ],
+      for: .selected)
+  }
 }
