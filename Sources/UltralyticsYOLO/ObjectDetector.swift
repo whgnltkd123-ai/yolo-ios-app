@@ -163,7 +163,8 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
     for i in 0..<numDetections {
       let base = i * detStride
       let conf = pointer[base + 4 * fieldStride]
-      guard conf > confThreshold else { continue }
+      let threshold = hasAerialClassScores && retainsWeakAerialDetections ? min(confThreshold, 0.10) : confThreshold
+      guard conf > threshold else { continue }
 
       let x1 = CGFloat(pointer[base])
       let y1 = CGFloat(pointer[base + fieldStride])

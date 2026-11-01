@@ -26,6 +26,8 @@
 	<false/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSMotionUsageDescription</key>
+	<string>움직임 보정 추적 모드에서 카메라 움직임을 판단하는 데 사용합니다.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>YOLO Drone Alert uses the camera for on-device object detection and drone-class alerts.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

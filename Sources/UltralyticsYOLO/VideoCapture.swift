@@ -181,6 +181,8 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
       let modelInputSize = predictor.modelInputSize
       let fills = predictor.imageCropAndScaleOption != .scaleFit  // center crop or stretch
       cameraQueue.async { [weak self] in
+        self?.aerialTracker?.reset()
+        predictor.retainsWeakAerialDetections = (self?.recognitionMode ?? .original) != .original
         self?.modelInputSize = modelInputSize
         self?.fillsModelInput = fills
         self?.configureInferenceBufferSize()
@@ -196,6 +198,50 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
   let videoOutput = AVCaptureVideoDataOutput()
   private let photoOutput = AVCapturePhotoOutput()
   let cameraQueue = DispatchQueue(label: "camera-queue")
+  // All tracker/GMC state is owned by the existing background analysis queue.
+  // Original mode allocates no tracker, sensor manager or thumbnail.
+  private var recognitionMode = AerialRecognitionMode.original
+  private var aerialTracker: AerialMotionTracker?
+  private var cameraMotion: CameraMotionCompensation?
+  private var motionEstimate = CameraMotionCompensation.Estimate()
+  private var trackingTimestamp = 0.0
+  private var trackingStarted = 0.0
+  private var motionMS = 0.0
+  private var trackingGeometry: (CGSize, Double)?
+  private var performanceRecording = false
+  private var performanceStart = 0.0, performanceFrames = 0.0, performanceDropped = 0.0
+  private var frameAnalysisStart = 0.0
+  func recordAerialPerformance(_ enabled: Bool) {
+    cameraQueue.async { [weak self] in
+      self?.performanceRecording = enabled
+      self?.performanceStart = CACurrentMediaTime()
+      self?.performanceFrames = 0; self?.performanceDropped = 0
+    }
+  }
+
+  func setRecognitionMode(_ mode: AerialRecognitionMode) {
+    cameraQueue.async { [weak self] in
+      guard let self else { return }
+      self.recognitionMode = mode
+      if self.performanceRecording {
+        self.performanceStart = CACurrentMediaTime()
+        self.performanceFrames = 0; self.performanceDropped = 0
+      }
+      if mode == .original {
+        self.aerialTracker = nil
+        self.trackingGeometry = nil
+      } else if self.aerialTracker == nil {
+        self.aerialTracker = AerialMotionTracker()
+      }
+      if mode == .compensatedTracking {
+        if self.cameraMotion == nil { self.cameraMotion = CameraMotionCompensation() }
+        self.cameraMotion?.start()
+      } else {
+        self.cameraMotion?.stop(); self.cameraMotion = nil
+      }
+      (self.predictor as? BasePredictor)?.retainsWeakAerialDetections = mode != .original
+    }
+  }
   var inferenceOK = true
 
   private let qrScan = QRCodeScan()
@@ -452,6 +498,8 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
 
   func stop() {
     cameraQueue.async { [weak self] in
+      self?.cameraMotion?.stop()
+      self?.aerialTracker?.reset()
       self?.qrScan.cancel()
       guard let self, self.captureSession.isRunning else { return }
       self.captureSession.stopRunning()
@@ -572,6 +620,25 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
       let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
     else { return }
     currentBuffer = pixelBuffer
+    if performanceRecording { frameAnalysisStart = CACurrentMediaTime() }
+    if let tracker = aerialTracker {
+      trackingStarted = CACurrentMediaTime()
+      trackingTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+      (predictor as? BasePredictor)?.retainsWeakAerialDetections = true
+      cameraMotion?.start()
+      motionEstimate = cameraMotion?.estimate(pixelBuffer, time:trackingTimestamp,
+        zoom:Double(captureDevice?.videoZoomFactor ?? 1), foreground:tracker.foreground)
+        ?? CameraMotionCompensation.Estimate()
+      let size = CGSize(width:CVPixelBufferGetWidth(pixelBuffer),height:CVPixelBufferGetHeight(pixelBuffer))
+      let zoom = Double(captureDevice?.videoZoomFactor ?? 1)
+      if let old = trackingGeometry, old.0 != size || abs(zoom/old.1-1)>0.005 || captureDevice?.isRampingVideoZoom == true {
+        motionEstimate.disrupted = true
+        motionEstimate.translation = .zero
+        motionEstimate.state = "줌/화면 변경 · 재평가"
+      }
+      trackingGeometry = (size,zoom)
+      motionMS = (CACurrentMediaTime()-trackingStarted)*1000
+    }
     self.predictor?.isUpdating = true
     predictor.predict(sampleBuffer: sampleBuffer, onResultsListener: self, onInferenceTime: self)
     currentBuffer = nil
@@ -626,10 +693,15 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
 }
 
 extension VideoCapture: AVCaptureVideoDataOutputSampleBufferDelegate {
+  public func captureOutput(_ output: AVCaptureOutput, didDrop sampleBuffer: CMSampleBuffer,
+                            from connection: AVCaptureConnection) {
+    if performanceRecording { performanceDropped += 1 }
+  }
   public func captureOutput(
     _ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
     from connection: AVCaptureConnection
   ) {
+    if performanceRecording { performanceFrames += 1 }
     if nativeBufferDimensions == nil, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
       let width = CVPixelBufferGetWidth(pixelBuffer)
       let height = CVPixelBufferGetHeight(pixelBuffer)
@@ -676,9 +748,34 @@ extension VideoCapture: ResultsListener, InferenceTimeListener {
   }
 
   public func on(result: YOLOResult) {
+    // Vision inference is synchronous on cameraQueue. Association runs here, never on main.
+    var delivered = result
+    if let tracker = aerialTracker, result.names == ["drone", "bird", "airplane"] {
+      let start = CACurrentMediaTime()
+      let objects = tracker.update(boxes:result.boxes,time:trackingTimestamp,
+        translation:motionEstimate.translation,disrupted:motionEstimate.disrupted)
+      delivered.tracking = AerialTrackingFrame(objects:objects,cameraState:motionEstimate.state,
+        processingMS:motionMS+(CACurrentMediaTime()-start)*1000,
+        latencyMS:(CACurrentMediaTime()-trackingStarted)*1000,
+        thermalState:ProcessInfo.processInfo.thermalState.rawValue)
+    }
+    if performanceRecording {
+      delivered.aerialPerformance = [
+        "mode":Double(recognitionMode.rawValue+1),
+        "camera_delivered_fps":performanceFrames/max(0.001,CACurrentMediaTime()-performanceStart),
+        "camera_dropped_buffers":performanceDropped,
+        "ai_fps":result.fps ?? 0,
+        "analysis_latency_ms":max(0,CACurrentMediaTime()-frameAnalysisStart)*1000,
+        "tracking_gmc_ms":delivered.tracking?.processingMS ?? 0,
+        "thermal_state":Double(ProcessInfo.processInfo.thermalState.rawValue),
+        "observed_tracks":Double(delivered.tracking?.objects.filter(\.observed).count ?? 0),
+        "predicted_only_tracks":Double(delivered.tracking?.objects.filter { !$0.observed }.count ?? 0),
+      ]
+    }
+    let output = delivered
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
-      self.delegate?.onPredict(result: result)
+      self.delegate?.onPredict(result: output)
       self.predictor?.isUpdating = false
       self.cameraQueue.async { self.processPendingPhoto() }
     }

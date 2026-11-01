@@ -177,6 +177,12 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var droneAlertEnabled = true
   private var previousAlertStage: DroneAlertStage = .none
   private let monitoringButton = UIButton(type: .system)
+  private let recognitionModes = UISegmentedControl(items:["1 기존 모델", "2 객체인식", "3 보정추적"])
+  private let trackingStatus = UILabel()
+  private var lastTrackingStatusUpdate = 0.0
+  private var recordingPerformance = false
+  private var performanceSamples: [[String:Double]] = []
+  private var lastPerformanceSample = 0.0
   private let monitoringStatusLabel = UILabel()
   private let evidenceStore = AerialEvidenceStore()
   private var evidenceEnabled = UserDefaults.standard.bool(forKey: "aerial.evidence")
@@ -184,6 +190,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private func installDroneAlertControls() {
     let panel = UIStackView(arrangedSubviews: [
+      recognitionModes, trackingStatus,
       aerialBoxesButton, droneAlertButton,
       monitoringButton, droneAlertStatusLabel, monitoringStatusLabel,
     ])
@@ -191,6 +198,13 @@ class ViewController: UIViewController, YOLOViewDelegate {
     panel.alignment = .leading
     panel.spacing = 5
     panel.translatesAutoresizingMaskIntoConstraints = false
+    recognitionModes.selectedSegmentIndex = 0
+    recognitionModes.overrideUserInterfaceStyle = .dark
+    recognitionModes.addTarget(self,action:#selector(recognitionModeChanged),for:.valueChanged)
+    trackingStatus.textColor = .white
+    trackingStatus.font = .systemFont(ofSize:11)
+    trackingStatus.numberOfLines = 2
+    trackingStatus.text = "기존 모델 · 추적/센서/보정 OFF"
 
     aerialBoxesButton.backgroundColor = UIColor.black.withAlphaComponent(0.76)
     aerialBoxesButton.setTitleColor(.white, for: .normal)
@@ -252,6 +266,19 @@ class ViewController: UIViewController, YOLOViewDelegate {
       : "모든 객체 표시 중. 공중 객체만 표시하기"
   }
 
+  @objc private func recognitionModeChanged() {
+    let mode = AerialRecognitionMode(rawValue:recognitionModes.selectedSegmentIndex) ?? .original
+    guard mode == .original || (currentTask == "Detect" && currentModelName.contains("aerial3")) else {
+      recognitionModes.selectedSegmentIndex = yoloView.aerialRecognitionMode.rawValue
+      showMonitoringMessage("보강된 aerial3 모델을 먼저 선택해 주세요.")
+      return
+    }
+    yoloView.aerialRecognitionMode = mode
+    resetDroneCandidate()
+    trackingStatus.text = mode == .original ? "기존 모델 · 추적/센서/보정 OFF"
+      : mode == .tracking ? "ID·누적 판정 ON · 카메라 보정 OFF" : "ID·누적 판정 ON · 자동 카메라 보정 ON"
+  }
+
   @objc private func toggleAerialBoxes() {
     yoloView.showsOnlyAerialDetections.toggle()
     updateAerialBoxesButton()
@@ -289,6 +316,9 @@ class ViewController: UIViewController, YOLOViewDelegate {
       message:
         "자동 채증은 앱 내 갤러리에만 보관합니다(최대 500MB). 사진 앱에는 선택한 자료만 저장할 수 있습니다. 가입자에게는 사진·위치 없이 드론 식별 알림만 전송합니다.\n\(RemoteDroneAlerts.shared.status)",
       preferredStyle: .actionSheet)
+    menu.addAction(UIAlertAction(title:recordingPerformance ? "성능 기록 종료·내보내기" : "성능 비교 기록 시작",style:.default) {
+      [weak self] _ in self?.togglePerformanceRecording()
+    })
     menu.addAction(
       UIAlertAction(title: evidenceEnabled ? "자동 채증 끄기" : "자동 채증 켜기", style: .default) {
         [weak self] _ in
@@ -365,6 +395,24 @@ class ViewController: UIViewController, YOLOViewDelegate {
     present(form, animated: true)
   }
 
+  private func togglePerformanceRecording() {
+    recordingPerformance.toggle()
+    yoloView.recordAerialPerformance(recordingPerformance)
+    if recordingPerformance {
+      performanceSamples.removeAll(); lastPerformanceSample = 0
+      showMonitoringMessage("같은 장면·줌으로 각 모드를 60초씩 사용하세요. 고정/손 이동 촬영은 별도로 기록하세요. 화면 FPS와 ID 정답률은 별도 실측이 필요합니다.")
+    } else {
+      let report: [String:Any] = ["model":currentModelName,"device":UIDevice.current.model,
+        "samples":performanceSamples,"limitations":"Delivered buffer FPS, not display FPS. No ground-truth IDs; no ID accuracy claim."]
+      guard let data = try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]) else { return }
+      let url = FileManager.default.temporaryDirectory.appendingPathComponent("aerial-performance-\(UUID().uuidString).json")
+      do { try data.write(to:url,options:.atomic) } catch { showMonitoringMessage(error.localizedDescription); return }
+      let share = UIActivityViewController(activityItems:[url],applicationActivities:nil)
+      share.popoverPresentationController?.sourceView = monitoringButton
+      present(share,animated:true)
+    }
+  }
+
   private func showMonitoringMessage(_ text: String) {
     let alert = UIAlertController(title: "채증 · 알림", message: text, preferredStyle: .alert)
     alert.addAction(UIAlertAction(title: "확인", style: .default))
@@ -389,7 +437,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
         }
       }
     }
-    if broadcastEnabled, let drone = result.boxes.first(where: { $0.aerialDisplayLabel == "드론" }) {
+    if broadcastEnabled, let drone = result.confirmedAerialDrone {
       RemoteDroneAlerts.shared.publish(score: drone.conf)
     }
   }
@@ -435,7 +483,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
       droneAlertStatusLabel.text = "새·드론 구분 모델을 선택하세요"
       return
     }
-    let high = result.boxes.first { $0.aerialDisplayLabel == "드론" }
+    let high = result.confirmedAerialDrone
     let stage: DroneAlertStage = high != nil ? .high : .none
     if stage == .none { droneAlertAudio.stop() } else { soundForStableStage(stage) }
     previousAlertStage = stage
@@ -895,6 +943,11 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
       if success {
         self.yoloView.capturesOriginalImage = self.evidenceEnabled && loadedTask == "Detect"
+        if loadedTask != "Detect" || !modelName.contains("aerial3") {
+          self.recognitionModes.selectedSegmentIndex = 0
+          self.yoloView.aerialRecognitionMode = .original
+          self.trackingStatus.text = "기존 모델 · 추적/센서/보정 OFF"
+        }
         let previousTask = self.currentTask
         self.currentTask = loadedTask
         if previousTask != loadedTask {
@@ -1584,6 +1637,17 @@ extension ViewController {
   }
 
   func yoloView(_ view: YOLOView, didReceiveResult result: YOLOResult) {
+    let now = CACurrentMediaTime()
+    if let tracking = result.tracking, now-lastTrackingStatusUpdate >= 1 {
+      lastTrackingStatusUpdate = now
+      trackingStatus.text = String(format:"%@ · 추적/보정 %.1f ms\n%@",tracking.cameraState,
+        tracking.processingMS,"예측 유지는 검출·경보에서 제외")
+    }
+    if recordingPerformance, let sample = result.aerialPerformance, now-lastPerformanceSample >= 1 {
+      lastPerformanceSample = now
+      if performanceSamples.count < 1800 { performanceSamples.append(sample.mapValues { $0.isFinite ? $0 : 0 }) }
+      else { yoloView.recordAerialPerformance(false) }
+    }
     let breakdownTotal = result.preMs + result.inferenceMs + result.postMs
     let text =
       breakdownTotal > 0

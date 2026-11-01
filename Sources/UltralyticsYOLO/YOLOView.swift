@@ -62,6 +62,8 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   }
 
   public func onPredict(result: YOLOResult) {
+    // Do not paint an in-flight tracking result after an explicit rollback to original mode.
+    if aerialRecognitionMode == .original && result.tracking != nil { return }
     // Notify consumers of detection results regardless of overlay visibility.
     delegate?.yoloView(self, didReceiveResult: result)
     onDetection?(result)
@@ -118,6 +120,17 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   }
 
   public var onDetection: ((YOLOResult) -> Void)?
+
+  /// Mode 1 is the unchanged detector; 2 adds IDs; 3 additionally compensates camera motion.
+  public var aerialRecognitionMode: AerialRecognitionMode = .original {
+    didSet {
+      videoCapture.setRecognitionMode(aerialRecognitionMode)
+      boundingBoxViews.forEach { $0.hide() }
+    }
+  }
+  public func recordAerialPerformance(_ enabled: Bool) {
+    videoCapture.recordAerialPerformance(enabled)
+  }
 
   /// Opt-in source frames for evidence capture.
   public var capturesOriginalImage = false {
@@ -508,6 +521,16 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
   }
 
   func showBoxes(predictions: YOLOResult) {
+    if aerialRecognitionMode != .original, let tracking = predictions.tracking {
+      let objects = Array(tracking.objects.prefix(boundingBoxViews.count))
+      for (index, object) in objects.enumerated() {
+        let rect = aspectFillDisplayRect(for:object.rect,imageSize:predictions.orig_shape,viewSize:bounds.size)
+        showBox(at:index,className:"#\(object.id) \(object.label)",confidence:CGFloat(object.score),
+          classIndex:object.observed ? 0 : 1,frame:rect)
+      }
+      for index in objects.count..<boundingBoxViews.count { boundingBoxViews[index].hide() }
+      return
+    }
     // Iterate directly without constructing a filtered array on every frame.
     // Inference still evaluates every class provided by the selected model.
     let maxVisible = min(50, boundingBoxViews.count)
@@ -590,11 +613,14 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     angle: CGFloat? = nil
   ) {
     let color: UIColor
-    switch className {
+    let decisionName = className.hasPrefix("#")
+      ? className.split(separator:" ").dropFirst().joined(separator:" ") : className
+    switch decisionName {
     case "드론": color = .systemRed
     case "새": color = .systemGreen
     case "비행기": color = .systemBlue
     case "드론 의심", "새 의심", "미확인 물체": color = .systemYellow
+    case "예측 유지": color = .systemGray
     default: color = ultralyticsColors[classIndex % ultralyticsColors.count]
     }
     let label = DetectionLabelStyle.text(className: className, confidence: confidence)
