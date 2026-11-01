@@ -55,9 +55,11 @@ final class AerialMotionTracker {
     let id: Int
     var axes: [MotionAxis]
     var lastSeen: Double
-    var lastStrong: Double
     var scores: [Float]?
     var hits = 1
+    var observations = 1
+    var decisionClass: String?
+    var decisionSince: Double
     var observedIndex: Int?
     var score: Float
     var rect: CGRect {
@@ -77,9 +79,9 @@ final class AerialMotionTracker {
               disrupted: Bool = false) -> [TrackedAerialObject] {
     let elapsed = previousTime.map { time - $0 } ?? 0
     previousTime = time
-    if elapsed < 0 || elapsed > 0.75 { tracks.removeAll() }
-    let dt = min(0.25, max(0, elapsed))
-    tracks.removeAll { time - $0.lastSeen > 0.45 || time - $0.lastStrong > 0.75 }
+    if elapsed < 0 || elapsed > 1.0 { tracks.removeAll() }
+    let dt = min(1.0, max(0, elapsed))
+    tracks.removeAll { time - $0.lastSeen > 1.0 }
     for i in tracks.indices {
       tracks[i].observedIndex = nil
       for j in 0..<4 { tracks[i].axes[j].predict(dt) }
@@ -87,6 +89,7 @@ final class AerialMotionTracker {
       tracks[i].axes[1].position += Double(translation.y)
       if disrupted {
         tracks[i].scores = nil; tracks[i].hits = 0
+        tracks[i].decisionClass = nil; tracks[i].decisionSince = time
         for j in 0..<4 { tracks[i].axes[j].velocity = 0 }
       }
     }
@@ -99,7 +102,7 @@ final class AerialMotionTracker {
     }.prefix(50)
     var remaining = Set(valid), unused = Set(tracks.indices)
     var ambiguous = Set<Int>()
-    // High-score association first. Low-score detections rescue only existing IDs.
+    // High-score association first, then weak candidates with tentative births.
     for high in [true, false] {
       let candidates = remaining.filter { (boxes[$0].conf >= 0.30) == high }
       var edges: [(Double, Int, Int)] = []
@@ -112,9 +115,19 @@ final class AerialMotionTracker {
           let dx = Double(a.midX-r.midX), dy = Double(a.midY-r.midY)
           let mahalanobis = dx*dx/(tracks[t].axes[0].p00+0.0001)
             + dy*dy/(tracks[t].axes[1].p00+0.0001)
-          let scale = [r.width/a.width, a.width/r.width, r.height/a.height, a.height/r.height].max() ?? 10
-          guard scale < 2.5, mahalanobis < 9.21, iou > (disrupted ? 0.55 : 0.10) else { continue }
-          edges.append((Double(1-iou) + 0.05*mahalanobis, t, b))
+          // A few pixels of size jitter must not split a tiny object's identity.
+          // The floor applies to association only, never to the displayed/detector box.
+          let aw = max(a.width, 0.00625), ah = max(a.height, 0.00625)
+          let rw = max(r.width, 0.00625), rh = max(r.height, 0.00625)
+          let scale = [rw/aw, aw/rw, rh/ah, ah/rh].max() ?? 10
+          // Tiny boxes can stop overlapping after only a few pixels of motion.
+          let extent = max(max(a.width,a.height),max(r.width,r.height))
+          let radius = min(disrupted ? 0.02 : 0.04, max(0.0125, Double(extent)*1.5))
+          let distance = sqrt(dx*dx + dy*dy)
+          let nearby = distance <= radius
+          guard scale < 2.5, mahalanobis < 9.21,
+            iou > (disrupted ? 0.55 : 0.10) || nearby else { continue }
+          edges.append((0.5*Double(1-iou) + 0.5*distance/radius + 0.05*mahalanobis, t, b))
         }
       }
       // Reject near-ties on either side instead of guessing identities in crossings.
@@ -137,11 +150,18 @@ final class AerialMotionTracker {
         let box = boxes[e.2], r = box.xywhn
         let values = [r.midX,r.midY,r.width,r.height].map(Double.init)
         for j in 0..<4 { tracks[e.1].axes[j].correct(values[j]) }
+        let continuous = time-tracks[e.1].lastSeen <= 0.35
+        let decision = high ? Self.decisionClass(box) : nil
+        if !continuous || decision == nil || decision != tracks[e.1].decisionClass {
+          tracks[e.1].scores = nil; tracks[e.1].hits = 0
+          tracks[e.1].decisionSince = time
+        }
+        tracks[e.1].decisionClass = decision
+        tracks[e.1].observations = continuous ? tracks[e.1].observations+1 : 1
         tracks[e.1].lastSeen = time
         tracks[e.1].observedIndex = e.2
         tracks[e.1].score = box.conf
         if high {
-          tracks[e.1].lastStrong = time
           tracks[e.1].hits += 1
           if let scores = Self.scores(box) {
             let alpha = Float(1-exp(-max(dt,0.01)/0.20))
@@ -153,18 +173,21 @@ final class AerialMotionTracker {
         unused.remove(e.1); remaining.remove(e.2)
       }
     }
-    for b in remaining.sorted() where boxes[b].conf >= 0.30 && !ambiguous.contains(b) {
+    for b in remaining.sorted() where !ambiguous.contains(b) {
       guard tracks.count < 50 else { break }
       let box = boxes[b], r = box.xywhn
       // Do not manufacture a second ID for a near-duplicate anchor/ambiguous crossing.
       if tracks.contains(where: { $0.rect.intersects(r) }) { continue }
       tracks.append(Track(id: nextID,
         axes: [r.midX,r.midY,r.width,r.height].map { MotionAxis(position: Double($0)) },
-        lastSeen: time, lastStrong: time, scores: Self.scores(box), observedIndex: b, score: box.conf))
+        lastSeen: time, scores: Self.scores(box), decisionClass: Self.decisionClass(box),
+        decisionSince: time, observedIndex: b, score: box.conf))
       nextID += 1
     }
     return tracks.compactMap { t in
       let observed = t.observedIndex != nil
+      // Weak births are invisible until repeated real observations establish a candidate.
+      guard t.score >= 0.30 || t.observations >= 3 else { return nil }
       guard observed || (!disrupted && time-t.lastSeen <= 0.25) else { return nil }
       var label = "미확인 물체"
       if observed, t.score >= 0.30, t.hits >= 3, let scores = t.scores,
@@ -175,12 +198,23 @@ final class AerialMotionTracker {
           classScores: ["drone":scores[0],"bird":scores[1],"airplane":scores[2]])
         let accumulated = proxy.aerialDisplayLabel ?? label
         // EMA cannot overrule contrary or ambiguous CURRENT evidence.
-        if accumulated == current { label = accumulated }
+        if accumulated == current {
+          // Repeated frames alone are not enough at high FPS: require elapsed evidence.
+          let confirmed = accumulated == "드론" || accumulated == "새"
+          if !confirmed || time-t.decisionSince >= 0.25 { label = accumulated }
+        }
       }
       return TrackedAerialObject(id: t.id, rect: t.rect, observed: observed,
         label: observed ? label : "예측 유지", score: observed ? t.score : 0,
         detectionIndex: t.observedIndex)
     }
+  }
+
+  private static func decisionClass(_ box: Box) -> String? {
+    guard let label = box.aerialDisplayLabel else { return nil }
+    if label == "드론" || label == "드론 의심" { return "drone" }
+    if label == "새" || label == "새 의심" { return "bird" }
+    return nil
   }
 
   private static func scores(_ b: Box) -> [Float]? {

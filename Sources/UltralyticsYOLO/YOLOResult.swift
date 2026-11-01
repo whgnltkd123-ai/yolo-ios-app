@@ -28,6 +28,28 @@ public struct YOLOResult: @unchecked Sendable {
   /// Opt-in profiling only; camera FPS is delivered buffers, not screen refresh rate.
   public var aerialPerformance: [String: Double]? = nil
 
+  /// Local warning only: predicted positions never renew audio or remote alerts.
+  public var aerialWarningLevel: Int {
+    let labels: [String]
+    if let tracking {
+      labels = tracking.objects.compactMap { item in
+        guard item.observed, let index = item.detectionIndex,
+          boxes.indices.contains(index) else { return nil }
+        return item.label
+      }
+    } else {
+      labels = boxes.compactMap { $0.aerialDisplayLabel }
+    }
+    return labels.map { label in
+      switch label {
+      case "드론": return 3
+      case "드론 의심": return 2
+      case "미확인 물체": return 1
+      default: return 0
+      }
+    }.max() ?? 0
+  }
+
   public var confirmedAerialDrone: Box? {
     if let tracking {
       guard let item = tracking.objects.first(where: { $0.observed && $0.label == "드론" }),

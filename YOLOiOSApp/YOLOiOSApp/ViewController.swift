@@ -31,7 +31,8 @@ let appTasks: [(name: String, shortName: String, folder: String, yoloTask: YOLOT
 /// Locally generated unknown/drone alert sounds. No bundled audio assets or network needed.
 private final class DroneAlertSoundPlayer {
   private var currentPlayer: AVAudioPlayer?
-  private var cachedTones: [Int: Data] = [:]
+  var isPlaying: Bool { currentPlayer?.isPlaying == true }
+  private var cachedPlayers: [Int: AVAudioPlayer] = [:]
   private var currentStage: Int?
   private var stopWhenResultsExpire: DispatchWorkItem?
 
@@ -49,22 +50,27 @@ private final class DroneAlertSoundPlayer {
   }
 
   func play(stage: Int) {
-    guard stage == 1 || stage == 3 else { return }
+    guard (1...3).contains(stage) else { return }
     // A loop must expire if camera results stop arriving.
     stopWhenResultsExpire?.cancel()
     let expiry = DispatchWorkItem { [weak self] in self?.stop() }
     stopWhenResultsExpire = expiry
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: expiry)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: expiry)
     if currentStage == stage && currentPlayer?.isPlaying == true { return }
-    let wav = cachedTones[stage] ?? Self.makeTone(stage: stage)
-    cachedTones[stage] = wav
     do {
       // The user explicitly enabled alerts: play through the speaker even in silent mode.
       try AVAudioSession.sharedInstance().setCategory(
         .playback, mode: .default, options: [.mixWithOthers])
       try AVAudioSession.sharedInstance().setActive(true)
       currentPlayer?.stop()
-      currentPlayer = try AVAudioPlayer(data: wav)
+      if let cached = cachedPlayers[stage] {
+        currentPlayer = cached
+      } else {
+        let player = try AVAudioPlayer(data: Self.makeTone(stage: stage))
+        cachedPlayers[stage] = player
+        currentPlayer = player
+      }
+      currentPlayer?.currentTime = 0
       currentPlayer?.volume = 1.0
       currentPlayer?.numberOfLoops = -1
       currentStage = stage
@@ -78,9 +84,9 @@ private final class DroneAlertSoundPlayer {
 
   private static func makeTone(stage: Int) -> Data {
     let sampleRate = 22_050
-    let duration = stage == 1 ? 0.48 : 1.6
+    let duration = Double(stage) * 0.24
     let count = Int(Double(sampleRate) * duration)
-    // Keep a one-second silent gap between repeated alert patterns.
+    // One, two or three distinct pulses per group; repeat only while observed.
     let silenceCount = sampleRate
     let byteCount = (count + silenceCount) * 2
     var wav = Data(capacity: 44 + byteCount)
@@ -111,18 +117,11 @@ private final class DroneAlertSoundPlayer {
     var phase = 0.0
     for index in 0..<count {
       let t = Double(index) / Double(sampleRate)
-      let frequency: Double
-      let gate: Double
-      switch stage {
-      case 1:  // Unknown: two short pulses
-        frequency = 630
-        gate = (t < 0.13 || (t > 0.25 && t < 0.38)) ? 0.55 : 0
-      default:  // High-confidence model indication: alternating siren
-        frequency = 950 + 390 * sin(2 * .pi * 2.5 * t)
-        gate = 0.80
-      }
+      let pulseTime = t.truncatingRemainder(dividingBy: 0.24)
+      let frequency = stage == 1 ? 630.0 : (stage == 2 ? 820.0 : 1100.0)
+      let gate = pulseTime < 0.13 ? (stage == 1 ? 0.55 : 0.80) : 0
       phase += 2 * .pi * frequency / Double(sampleRate)
-      let fade = min(1.0, min(t * 50, (duration - t) * 50))
+      let fade = min(1.0, min(pulseTime * 100, (0.13 - pulseTime) * 100))
       let sample = Int16(max(-1, min(1, sin(phase) * gate * max(0, fade))) * 32767)
       le16(UInt16(bitPattern: sample))
     }
@@ -166,8 +165,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   // MARK: - Stable bird/drone warning levels (experimental model estimates, not identity proof)
   private enum DroneAlertStage: Int, Hashable {
-    case none = 0
-    case high = 3
+    case none = 0, unknown = 1, suspected = 2, high = 3
   }
 
   private let aerialBoxesButton = UIButton(type: .system)
@@ -305,6 +303,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private func applyMonitoringSettings() {
     // Only opt-in evidence capture requires a full-resolution frame copy.
+    yoloView.originalImageCaptureInterval = 1
     yoloView.capturesOriginalImage = evidenceEnabled
     UserDefaults.standard.set(evidenceEnabled, forKey: "aerial.evidence")
     monitoringStatusLabel.text = "자동 채증 \(evidenceEnabled ? "ON" : "OFF") · 전송 \(broadcastEnabled ? "ON" : "OFF")"
@@ -452,13 +451,14 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
   private func soundForStableStage(_ stage: DroneAlertStage) {
     guard stage != .none else { return }
+    let wasPlaying = droneAlertAudio.isPlaying
     droneAlertAudio.play(stage: stage.rawValue)
-    guard stage != previousAlertStage else { return }
+    guard stage != previousAlertStage || !wasPlaying else { return }
     switch stage {
     case .high:
       UINotificationFeedbackGenerator().notificationOccurred(.error)
       AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
-    case .none: break
+    case .suspected, .unknown, .none: break
     }
   }
 
@@ -483,13 +483,20 @@ class ViewController: UIViewController, YOLOViewDelegate {
       droneAlertStatusLabel.text = "새·드론 구분 모델을 선택하세요"
       return
     }
-    let high = result.confirmedAerialDrone
-    let stage: DroneAlertStage = high != nil ? .high : .none
-    if stage == .none { droneAlertAudio.stop() } else { soundForStableStage(stage) }
-    previousAlertStage = stage
-    droneAlertStatusLabel.text = high.map { "드론 \(Int($0.conf * 100))점" }
-      ?? result.boxes.first(where: { $0.aerialDisplayLabel != nil })?.aerialDisplayLabel
-      ?? "감시 중 · 현재 탐지 없음"
+    let stage = DroneAlertStage(rawValue: result.aerialWarningLevel) ?? .none
+    if stage != .none {
+      soundForStableStage(stage)
+      previousAlertStage = stage
+    } else if !result.boxes.isEmpty {
+      resetDroneCandidate()
+    }
+    // No call to play on missing/predicted evidence: the short audio tail cannot refresh itself.
+    switch stage {
+    case .high: droneAlertStatusLabel.text = "드론 확정 · 3단계 경보"
+    case .suspected: droneAlertStatusLabel.text = "드론 의심 · 2단계 경보"
+    case .unknown: droneAlertStatusLabel.text = "미확인 후보 · 1단계 알림"
+    case .none: droneAlertStatusLabel.text = "감시 중 · 경보 대상 없음"
+    }
   }
 
   // MARK: - Constants

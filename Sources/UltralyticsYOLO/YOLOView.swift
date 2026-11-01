@@ -132,6 +132,13 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     videoCapture.recordAerialPerformance(enabled)
   }
 
+  /// Throttle optional evidence image copies without throttling inference or preview.
+  public var originalImageCaptureInterval: TimeInterval = 0 {
+    didSet {
+      (videoCapture.predictor as? BasePredictor)?.originalImageCaptureInterval = originalImageCaptureInterval
+    }
+  }
+
   /// Opt-in source frames for evidence capture.
   public var capturesOriginalImage = false {
     didSet {
@@ -281,6 +288,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
         switch result {
         case .success(let predictor):
           predictor.capturesOriginalImage = self.capturesOriginalImage
+          predictor.originalImageCaptureInterval = self.originalImageCaptureInterval
           self.boundingBoxViews.forEach { $0.hide() }
           self.removeClassificationLayers()
           self.task = task
