@@ -76,9 +76,41 @@ final class MotionTrackingTests: XCTestCase {
     XCTAssertTrue(weak.update(boxes:[tiny(0.2,0.2)],time:1).isEmpty)
     XCTAssertTrue(weak.update(boxes:[tiny(0.201,0.2)],time:1.1).isEmpty)
     let candidate = weak.update(boxes:[tiny(0.202,0.2)],time:1.2)
-    XCTAssertEqual(candidate.first?.label,box(0.2,score:0.2).aerialDisplayLabel)
-    XCTAssertEqual(candidate.first?.observed,true)
-    XCTAssertNotNil(candidate.first?.detectionIndex)
+    XCTAssertTrue(candidate.isEmpty)
+    XCTAssertEqual(weak.update(boxes:[tiny(0.202)],time:1.3).first?.id,1)
+  }
+
+  func testOfficialCOCOLabelsDoNotRequireAbsentDroneScore() {
+    let tracker = AerialMotionTracker()
+    let r = CGRect(x:0.2,y:0.3,width:0.08,height:0.06)
+    let bird = Box(index:14,cls:"bird",conf:0.8,xywh:r,xywhn:r)
+    let person = Box(index:0,cls:"person",conf:0.9,xywh:r,xywhn:r)
+    let output = tracker.update(boxes:[person,bird],time:1)
+    XCTAssertEqual(output.count,1)
+    XCTAssertEqual(output.first?.label,"새")
+    XCTAssertEqual(output.first?.detectionIndex,1)
+    XCTAssertEqual(tracker.update(boxes:[bird],time:1.1).first?.id,output.first?.id)
+  }
+
+  func testSlowAnalysisGapKeepsIDButDoesNotExtendDetectionEvidence() {
+    let tracker = AerialMotionTracker()
+    let first = tracker.update(boxes:[box(0.2)],time:1)
+    XCTAssertTrue(tracker.update(boxes:[],time:1.5).isEmpty)
+    let recovered = tracker.update(boxes:[box(0.2)],time:2.3)
+    XCTAssertEqual(first.first?.id,recovered.first?.id)
+    XCTAssertEqual(recovered.first?.label,"미확인 물체")
+    XCTAssertTrue(recovered.first?.observed == true)
+    let expired = tracker.update(boxes:[box(0.2)],time:6)
+    XCTAssertNotEqual(expired.first?.id,first.first?.id)
+  }
+
+  func testWeakNoiseNeverConsumesIdentityNumbers() {
+    let tracker = AerialMotionTracker()
+    for i in 0..<100 {
+      XCTAssertTrue(tracker.update(boxes:[box(CGFloat(i%9)/10,score:0.15)],
+                                   time:1+Double(i)*0.1).isEmpty)
+    }
+    XCTAssertEqual(tracker.update(boxes:[box(0.2)],time:11).first?.id,1)
   }
   func testNearbyAmbiguousObjectsAreNotForcedIntoOneID() {
     let tracker = AerialMotionTracker()

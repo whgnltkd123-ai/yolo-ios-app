@@ -16,6 +16,7 @@ APP_DIR="$SCRIPT_DIR/../YOLOiOSApp"
 # Model to directory mapping
 MODELS=(
   "yolo26n:Models/Detect"
+  "yolo26s:Models/Detect"
   "yolo26n-seg:Models/Segment"
   "yolo26n-sem:Models/Semantic"
   "yolo26n-depth:Models/Depth"
@@ -57,6 +58,10 @@ process_model() {
       echo "⚠️ $model_name download failed or archive invalid (attempt $attempt), retrying..."
       sleep 5
     done
+
+    if [[ "$model_name" == "yolo26s" ]]; then
+      echo "d0f166da289e0e57a6c1883f10bcad028465f509804399414dff05a37faaac1c  $zip_path" | shasum -a 256 -c -
+    fi
 
     # Extract to temp directory to handle nested structure
     local tmp_dir="$OUTPUT_DIR/_tmp_extract_$$"

@@ -2,6 +2,35 @@
 
 # Real-Time Performance
 
+## Official object modes: validation pending
+
+Mode 1 loads the preserved `yolo26s-aerial3` checkpoint (c7df126a...) without a
+tracker or GMC. Modes 2 and 3 load official Ultralytics v8.3.0 `yolo26s`
+Core ML, with only bird and airplane detections admitted to tracking/display.
+These are category filters, not evidence that the object is airborne. COCO has
+no drone class: these modes must not advertise drone identification until an
+appropriately trained checkpoint is evaluated. Model switches clear model-specific
+tracks; switching between modes 2 and 3 keeps the same model and tracker.
+
+The Swift adapter follows Ultralytics ByteTrack's high/low association and
+separate birth threshold (0.25/0.10/0.25); low detections do not allocate IDs.
+Global minimum-cost assignment replaces greedy edge consumption. Lost identities
+remain eligible for 30 analysis frames with a 3-second wall-time cap; displayed
+predictions still expire after 0.25 seconds and never renew detection alarms.
+MotionAxis, geometric gates, crossing ambiguity rejection and the native GMC
+implementation remain custom: this is NOT an exact Python ByteTrack/BoT-SORT port
+and must not be described as upstream-equivalent or a new learned tracker model.
+Reference: https://github.com/ultralytics/ultralytics/tree/main/ultralytics/trackers
+
+The generic official model displays its bird/airplane label without requiring a
+nonexistent drone competitor score or aerial3 EMA agreement. Mode 1's aerial
+classification policy, camera buffer sizing and ANE selection are unchanged.
+Synthetic regression checks cover weak-noise births, recovery after slow analysis,
+COCO labels and non-aerial filtering. Native compilation/tests, source-equivalence
+comparison and iPhone 15 FPS/ID-switch/false-merge/thermal measurements remain
+pending; code inspection is not device performance proof. Revert to mode 1 to
+disable all tracking and GMC without changing the preserved checkpoint.
+
 Canonical record of the on-device and host profiling behind the Ultralytics YOLO iOS SDK's camera and [Core ML](https://developer.apple.com/documentation/coreml) configuration. Each section is a self-contained experiment: the question, the empirical result, and the conclusion. Use it as the starting point and baseline for future performance work.
 
 > [!IMPORTANT]
