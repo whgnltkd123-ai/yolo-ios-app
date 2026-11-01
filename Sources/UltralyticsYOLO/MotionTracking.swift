@@ -58,6 +58,8 @@ final class AerialMotionTracker {
     var scores: [Float]?
     var hits = 1
     var observations = 1
+    var decisionClass: String?
+    var decisionSince: Double
     var observedIndex: Int?
     var score: Float
     var rect: CGRect {
@@ -87,6 +89,7 @@ final class AerialMotionTracker {
       tracks[i].axes[1].position += Double(translation.y)
       if disrupted {
         tracks[i].scores = nil; tracks[i].hits = 0
+        tracks[i].decisionClass = nil; tracks[i].decisionSince = time
         for j in 0..<4 { tracks[i].axes[j].velocity = 0 }
       }
     }
@@ -143,7 +146,14 @@ final class AerialMotionTracker {
         let box = boxes[e.2], r = box.xywhn
         let values = [r.midX,r.midY,r.width,r.height].map(Double.init)
         for j in 0..<4 { tracks[e.1].axes[j].correct(values[j]) }
-        tracks[e.1].observations = time-tracks[e.1].lastSeen <= 0.35 ? tracks[e.1].observations+1 : 1
+        let continuous = time-tracks[e.1].lastSeen <= 0.35
+        let decision = high ? Self.decisionClass(box) : nil
+        if !continuous || decision == nil || decision != tracks[e.1].decisionClass {
+          tracks[e.1].scores = nil; tracks[e.1].hits = 0
+          tracks[e.1].decisionSince = time
+        }
+        tracks[e.1].decisionClass = decision
+        tracks[e.1].observations = continuous ? tracks[e.1].observations+1 : 1
         tracks[e.1].lastSeen = time
         tracks[e.1].observedIndex = e.2
         tracks[e.1].score = box.conf
@@ -166,7 +176,8 @@ final class AerialMotionTracker {
       if tracks.contains(where: { $0.rect.intersects(r) }) { continue }
       tracks.append(Track(id: nextID,
         axes: [r.midX,r.midY,r.width,r.height].map { MotionAxis(position: Double($0)) },
-        lastSeen: time, scores: Self.scores(box), observedIndex: b, score: box.conf))
+        lastSeen: time, scores: Self.scores(box), decisionClass: Self.decisionClass(box),
+        decisionSince: time, observedIndex: b, score: box.conf))
       nextID += 1
     }
     return tracks.compactMap { t in
@@ -183,12 +194,23 @@ final class AerialMotionTracker {
           classScores: ["drone":scores[0],"bird":scores[1],"airplane":scores[2]])
         let accumulated = proxy.aerialDisplayLabel ?? label
         // EMA cannot overrule contrary or ambiguous CURRENT evidence.
-        if accumulated == current { label = accumulated }
+        if accumulated == current {
+          // Repeated frames alone are not enough at high FPS: require elapsed evidence.
+          let confirmed = accumulated == "드론" || accumulated == "새"
+          if !confirmed || time-t.decisionSince >= 0.25 { label = accumulated }
+        }
       }
       return TrackedAerialObject(id: t.id, rect: t.rect, observed: observed,
         label: observed ? label : "예측 유지", score: observed ? t.score : 0,
         detectionIndex: t.observedIndex)
     }
+  }
+
+  private static func decisionClass(_ box: Box) -> String? {
+    guard let label = box.aerialDisplayLabel else { return nil }
+    if label == "드론" || label == "드론 의심" { return "drone" }
+    if label == "새" || label == "새 의심" { return "bird" }
+    return nil
   }
 
   private static func scores(_ b: Box) -> [Float]? {

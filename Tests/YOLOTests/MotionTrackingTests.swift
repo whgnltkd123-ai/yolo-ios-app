@@ -26,12 +26,12 @@ final class MotionTrackingTests: XCTestCase {
   func testCompensationTransitionPreservesIDAndDisruptionRevokesConfirmation() {
     let tracker = AerialMotionTracker()
     let a = tracker.update(boxes:[box(0.2)],time:1)
-    _ = tracker.update(boxes:[box(0.2)],time:1.05)
-    let stable = tracker.update(boxes:[box(0.2)],time:1.10)
+    _ = tracker.update(boxes:[box(0.2)],time:1.15)
+    let stable = tracker.update(boxes:[box(0.2)],time:1.30)
     XCTAssertEqual(stable.first?.label,"드론")
-    let moved = tracker.update(boxes:[box(0.23)],time:1.15,translation:CGPoint(x:0.03,y:0))
+    let moved = tracker.update(boxes:[box(0.23)],time:1.35,translation:CGPoint(x:0.03,y:0))
     XCTAssertEqual(moved.first?.id,a.first?.id)
-    let changed = tracker.update(boxes:[box(0.23)],time:1.20,disrupted:true)
+    let changed = tracker.update(boxes:[box(0.23)],time:1.40,disrupted:true)
     XCTAssertEqual(changed.first?.id,a.first?.id)
     XCTAssertEqual(changed.first?.label,"미확인 물체")
   }
@@ -40,6 +40,19 @@ final class MotionTrackingTests: XCTestCase {
     for i in 0..<6 { _ = tracker.update(boxes:[box(0.2)],time:1+Double(i)*0.05) }
     let mixed = tracker.update(boxes:[box(0.2,score:0.7,bird:0.5)],time:1.3)
     XCTAssertEqual(mixed.first?.label,"미확인 물체")
+  }
+  func testBirdConflictRequiresFreshDroneEvidenceWithoutChangingID() {
+    let tracker = AerialMotionTracker()
+    for i in 0..<8 { _ = tracker.update(boxes:[box(0.2)],time:1+Double(i)*0.05) }
+    let r = CGRect(x:0.2,y:0.3,width:0.08,height:0.06)
+    let bird = Box(index:1,cls:"bird",conf:0.8,xywh:r,xywhn:r,
+      classScores:["drone":0.02,"bird":0.8,"airplane":0.01])
+    let conflict = tracker.update(boxes:[bird],time:1.4)
+    let returned = tracker.update(boxes:[box(0.2)],time:1.45)
+    XCTAssertEqual(conflict.first?.id,returned.first?.id)
+    XCTAssertNotEqual(returned.first?.label,"드론")
+    for i in 0..<4 { _ = tracker.update(boxes:[box(0.2)],time:1.5+Double(i)*0.05) }
+    XCTAssertEqual(tracker.update(boxes:[box(0.2)],time:1.75).first?.label,"드론")
   }
   func testUnobservedTrackCannotTriggerDroneAlert() {
     var result = YOLOResult(orig_shape:.zero,boxes:[box(0.2)],speed:0,names:["drone","bird","airplane"])

@@ -50,6 +50,9 @@ public class BasePredictor: Predictor, @unchecked Sendable {
 
   /// Whether camera predictions should include a copy of the original input image in `YOLOResult`.
   public var capturesOriginalImage = false
+  /// Minimum seconds between optional camera image copies; zero preserves per-frame capture.
+  public var originalImageCaptureInterval: TimeInterval = 0
+  private var lastOriginalImageCapture: TimeInterval = -.infinity
 
   /// Whether realtime (camera) segmentation predictions should materialize per-instance masks
   /// (`YOLOResult.masks.masks`) in addition to the combined display mask. Off by default to avoid the per-frame cost
@@ -361,7 +364,13 @@ public class BasePredictor: Predictor, @unchecked Sendable {
     guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
     currentOnResultsListener = onResultsListener
     currentOnInferenceTimeListener = onInferenceTime
-    currentOriginalImage = capturesOriginalImage ? makeUIImage(from: pixelBuffer) : nil
+    let captureTime = ProcessInfo.processInfo.systemUptime
+    if capturesOriginalImage && captureTime-lastOriginalImageCapture >= originalImageCaptureInterval {
+      currentOriginalImage = makeUIImage(from: pixelBuffer)
+      lastOriginalImageCapture = captureTime
+    } else {
+      currentOriginalImage = nil
+    }
     guard let request = visionRequest else {
       isUpdating = false
       return
