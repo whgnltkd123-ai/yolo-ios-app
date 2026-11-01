@@ -943,6 +943,11 @@ class ViewController: UIViewController, YOLOViewDelegate {
 
       if success {
         self.yoloView.capturesOriginalImage = self.evidenceEnabled && loadedTask == "Detect"
+        if loadedTask != "Detect" || !modelName.contains("aerial3") {
+          self.recognitionModes.selectedSegmentIndex = 0
+          self.yoloView.aerialRecognitionMode = .original
+          self.trackingStatus.text = "기존 모델 · 추적/센서/보정 OFF"
+        }
         let previousTask = self.currentTask
         self.currentTask = loadedTask
         if previousTask != loadedTask {
@@ -1640,8 +1645,8 @@ extension ViewController {
     }
     if recordingPerformance, let sample = result.aerialPerformance, now-lastPerformanceSample >= 1 {
       lastPerformanceSample = now
-      if performanceSamples.count < 1800 { performanceSamples.append(sample) }
-      else { recordingPerformance = false; yoloView.recordAerialPerformance(false) }
+      if performanceSamples.count < 1800 { performanceSamples.append(sample.mapValues { $0.isFinite ? $0 : 0 }) }
+      else { yoloView.recordAerialPerformance(false) }
     }
     let breakdownTotal = result.preMs + result.inferenceMs + result.postMs
     let text =

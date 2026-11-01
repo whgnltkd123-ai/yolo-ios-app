@@ -613,11 +613,14 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     angle: CGFloat? = nil
   ) {
     let color: UIColor
-    switch className {
+    let decisionName = className.hasPrefix("#")
+      ? className.split(separator:" ").dropFirst().joined(separator:" ") : className
+    switch decisionName {
     case "드론": color = .systemRed
     case "새": color = .systemGreen
     case "비행기": color = .systemBlue
     case "드론 의심", "새 의심", "미확인 물체": color = .systemYellow
+    case "예측 유지": color = .systemGray
     default: color = ultralyticsColors[classIndex % ultralyticsColors.count]
     }
     let label = DetectionLabelStyle.text(className: className, confidence: confidence)

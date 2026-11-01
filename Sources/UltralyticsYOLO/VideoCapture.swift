@@ -181,8 +181,8 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
       let modelInputSize = predictor.modelInputSize
       let fills = predictor.imageCropAndScaleOption != .scaleFit  // center crop or stretch
       cameraQueue.async { [weak self] in
-          self?.aerialTracker?.reset()
-          predictor.retainsWeakAerialDetections = self?.recognitionMode != .original
+        self?.aerialTracker?.reset()
+        predictor.retainsWeakAerialDetections = (self?.recognitionMode ?? .original) != .original
         self?.modelInputSize = modelInputSize
         self?.fillsModelInput = fills
         self?.configureInferenceBufferSize()
@@ -631,7 +631,7 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
         ?? CameraMotionCompensation.Estimate()
       let size = CGSize(width:CVPixelBufferGetWidth(pixelBuffer),height:CVPixelBufferGetHeight(pixelBuffer))
       let zoom = Double(captureDevice?.videoZoomFactor ?? 1)
-      if let old = trackingGeometry, old.0 != size || abs(zoom/old.1-1)>0.025 {
+      if let old = trackingGeometry, old.0 != size || abs(zoom/old.1-1)>0.005 || captureDevice?.isRampingVideoZoom == true {
         motionEstimate.disrupted = true
         motionEstimate.translation = .zero
         motionEstimate.state = "줌/화면 변경 · 재평가"

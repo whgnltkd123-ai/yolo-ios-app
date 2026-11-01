@@ -50,7 +50,12 @@ final class MotionTrackingTests: XCTestCase {
   }
   func testSparseFlowTranslationAndTexturelessFailure() {
     let flow = CameraMotionCompensation()
-    let old = (0..<(96*64)).map { i in UInt8((i*73+(i/96)*31+(i*i)%113)%256) }
+    var old = [UInt8](repeating:0,count:96*64)
+    for i in old.indices {
+      let row: Int = (i/96)*31
+      let texture: Int = (i*i)%113
+      old[i] = UInt8((i*73+row+texture)%256)
+    }
     var shifted = [UInt8](repeating:0,count:old.count)
     for y in 0..<64 { for x in 2..<96 { shifted[y*96+x] = old[y*96+x-2] } }
     let vectors = flow.flow(from:old,to:shifted,excluding:[],deadline:.infinity)
