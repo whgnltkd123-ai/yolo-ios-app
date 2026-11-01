@@ -11,6 +11,9 @@ final class AerialDecisionTests: XCTestCase {
     XCTAssertEqual(detection("drone", 0.6, ["drone": 0.6, "bird": 0.4]).aerialDisplayLabel, "미확인 물체")
     XCTAssertEqual(detection("drone", 0.29, ["drone": 0.29, "bird": 0]).aerialDisplayLabel, "미확인 물체")
     XCTAssertEqual(detection("drone", 0.8, ["drone": 0.8, "bird": 0.1, "airplane": 0.75]).aerialDisplayLabel, "미확인 물체")
+    XCTAssertEqual(detection("drone", 0.7, ["drone": 0.7, "bird": 0.4]).aerialDisplayLabel, "미확인 물체")
+    XCTAssertEqual(detection("bird", 0.8, ["drone": 0.3, "bird": 0.8]).aerialDisplayLabel, "미확인 물체")
+    XCTAssertEqual(detection("drone", 0.8, ["drone": 0.8, "bird": 0.1, "airplane": 0.3]).aerialDisplayLabel, "미확인 물체")
   }
 
   func testSymmetricSuspicionAndConfirmation() {

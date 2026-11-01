@@ -117,10 +117,14 @@ public struct Box: @unchecked Sendable {
     let isDrone = category == "drone" || category == "uav"
     let selected = isDrone ? drone : bird
     let competing = isDrone ? bird : drone
-    guard abs(selected - conf) < 0.02, selected >= 0.30,
+    // Two plausible classes remain unresolved even when their score gap is large.
+    guard abs(selected - conf) < 0.02, selected >= 0.30, competing < 0.30,
       selected - competing > 0.20 + 0.000001
     else { return "미확인 물체" }
-    if let plane = scores["airplane"], !plane.isFinite || selected - plane <= 0.20 + 0.000001 {
+    if let plane = scores["airplane"],
+      !plane.isFinite || !(0...1).contains(plane) || plane >= 0.30
+        || selected - plane <= 0.20 + 0.000001
+    {
       return "미확인 물체"
     }
     if selected >= 0.60 { return isDrone ? "드론" : "새" }
