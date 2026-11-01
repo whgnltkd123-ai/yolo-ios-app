@@ -7,19 +7,21 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEST = ROOT / "Sources/OfficialByteTrack/dependencies"
 SOURCES = [
-    ("eigen", "eigenteam/eigen-git-mirror", "cf794d3b741a6278df169e58461f8529f43bce5d", "Eigen/", ["COPYING.MPL2", "COPYING.BSD"]),
-    ("opencv", "opencv/opencv", "49486f61fb25722cbcf586b7f4320921d46fb38e", "modules/core/include/", ["LICENSE"]),
+    ("eigen", "eigenteam/eigen-git-mirror", "cf794d3b741a6278df169e58461f8529f43bce5d", "Eigen/", ["COPYING.MPL2", "COPYING.BSD"], "c7f57546eaacf7aab2c7471285119a5456f7ccdc86c86530a047eed6ca96aa9c"),
+    ("opencv", "opencv/opencv", "49486f61fb25722cbcf586b7f4320921d46fb38e", "modules/core/include/", ["LICENSE"], "8f00b42869ab2836be36090f6631ae4c38ba59171e22a69a8e0f92f8ef1771d4"),
 ]
 def main():
     import hashlib
     records=[]
-    for name, repo, commit, prefix, licenses in SOURCES:
+    for name, repo, commit, prefix, licenses, expected_sha in SOURCES:
         marker=DEST/name/"prepared.json"
         if marker.exists() and json.loads(marker.read_text())["commit"] == commit:
             continue
         url=f"https://codeload.github.com/{repo}/tar.gz/{commit}"
         with urllib.request.urlopen(url, timeout=120) as response:
             data=response.read()
+        if hashlib.sha256(data).hexdigest() != expected_sha:
+            raise ValueError(f"upstream archive SHA mismatch: {name}")
         count=0
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
             for member in archive:
@@ -36,6 +38,10 @@ def main():
         record=dict(repo=repo,commit=commit,archive_sha256=hashlib.sha256(data).hexdigest(),files=count)
         marker.write_text(json.dumps(record,indent=2))
         records.append(record)
+    # OpenCV normally generates this module inventory during CMake configuration.
+    # We consume core geometry headers only, not an OpenCV image-processing runtime.
+    (DEST/"opencv/opencv2/opencv_modules.hpp").write_text(
+        "#pragma once\n#define HAVE_OPENCV_CORE\n")
     print(json.dumps(records))
 if __name__ == "__main__":
     main()
