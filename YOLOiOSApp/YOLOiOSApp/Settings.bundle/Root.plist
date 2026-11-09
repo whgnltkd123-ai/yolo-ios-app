@@ -44,16 +44,6 @@
                 <key>DefaultValue</key>
                 <false/>
             </dict>
-            <dict>
-                <key>Type</key>
-                <string>PSToggleSwitchSpecifier</string>
-                <key>Title</key>
-                <string>미확인 물체 자동 확대</string>
-                <key>Key</key>
-                <string>aerial_unknown_zoom</string>
-                <key>DefaultValue</key>
-                <true/>
-            </dict>
         </array>
     </dict>
 </plist>

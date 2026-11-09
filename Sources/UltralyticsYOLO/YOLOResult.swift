@@ -62,7 +62,7 @@ public struct YOLOResult: @unchecked Sendable {
   public let orig_shape: CGSize
 
   /// Array of detected bounding boxes with class information and confidence scores.
-  public let boxes: [Box]
+  public internal(set) var boxes: [Box]
 
   /// Optional segmentation masks for instance segmentation results.
   public var masks: Masks?
@@ -135,8 +135,8 @@ public struct Box: @unchecked Sendable {
   /// Missing scores are not zero and cannot establish a drone-versus-bird margin.
   public var classScores: [String: Float]? = nil
 
-  /// A drone found only on a second view can trigger a suspicion, never a confirmation.
-  var isCropRecheck = false
+  /// An observed low-score location for manually aiming the camera, never a class identification.
+  var isFirstSighting = false
 
   /// Single-frame display decision, not a calibrated probability or tracked identity.
   /// Missing competitor scores must never be interpreted as zero.
@@ -165,7 +165,7 @@ public struct Box: @unchecked Sendable {
     {
       return "미확인 물체"
     }
-    if selected >= 0.60 && !(isDrone && isCropRecheck) { return isDrone ? "드론" : "새" }
+    if selected >= 0.60 { return isDrone ? "드론" : "새" }
     return isDrone ? "드론 의심" : "새 의심"
   }
 }

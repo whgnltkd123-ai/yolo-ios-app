@@ -581,8 +581,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
     appTasks.forEach { modelsForTask[$0.name] = getModelFiles(in: $0.folder) }
 
     setupModelActions()
-    UserDefaults.standard.register(defaults: ["aerial_unknown_zoom": true])
-    yoloView.setDroneRecheck(UserDefaults.standard.bool(forKey: "aerial_unknown_zoom"))
 
     currentTask = appTasks.first { $0.yoloTask == Constants.defaultTask }!.name
 
@@ -598,9 +596,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     NotificationCenter.default.addObserver(
       forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
     ) { [weak self] _ in
-      guard let self = self else { return }
-      self.yoloView.setDroneRecheck(UserDefaults.standard.bool(forKey: "aerial_unknown_zoom"))
-      guard !self.isLoadingModel,
+      guard let self = self, !self.isLoadingModel,
         preferredModelExtension != remoteModelExtension
       else { return }
       remoteModelExtension = preferredModelExtension

@@ -129,11 +129,6 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       boundingBoxViews.forEach { $0.hide() }
     }
   }
-  /// Enables automatic same-model crop verification of visible unidentified aerial objects.
-  public func setDroneRecheck(_ enabled: Bool) {
-    videoCapture.setDroneRecheck(enabled)
-  }
-
   public func recordAerialPerformance(_ enabled: Bool) {
     videoCapture.recordAerialPerformance(enabled)
   }
