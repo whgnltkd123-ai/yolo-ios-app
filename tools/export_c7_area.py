@@ -3,10 +3,12 @@ from pathlib import Path
 import hashlib
 import json
 import subprocess
+from types import MethodType
 
 import numpy as np
 import torch
 from ultralytics import YOLO
+from ultralytics.utils.export.coreml import _coreml_gather
 from import_trained_yolo26_drone import retain_aerial_class_scores
 
 C7 = "c7df126a039c1edde8d6b3e0c78be99f43e6770913eb1ff201976e2cf2505d26"
@@ -27,9 +29,8 @@ class AreaOutputs(torch.nn.Module):
         boxes = head._get_decode_boxes(many).transpose(1, 2)
         scores = many["scores"].sigmoid().transpose(1, 2)
         drone, index = scores[:, :, 0].topk(300, dim=1)
-        idx = index.unsqueeze(2)
-        auxiliary = torch.cat((boxes.gather(1, idx.expand(-1, -1, 4)), drone.unsqueeze(2),
-                               torch.zeros_like(drone).unsqueeze(2), scores.gather(1, idx.expand(-1, -1, 3))), dim=2)
+        auxiliary = torch.cat((head._gather(boxes, index), drone.unsqueeze(2),
+                               torch.zeros_like(drone).unsqueeze(2), head._gather(scores, index)), dim=2)
         return primary, auxiliary
 
 
@@ -54,11 +55,15 @@ def main():
     from ultralytics.data.augment import LetterBox
     torch.set_num_threads(4)
     net=AreaOutputs(Path("checkpoints/aerial-three/best.pt")).eval()
+    # Ultralytics' Core ML exporter uses this gather to retain integer anchor indices through MIL.
+    head=net.network.model[-1]
+    head._gather=MethodType(_coreml_gather,head)
     dummy=torch.zeros(1,3,640,640)
     with torch.inference_mode():
         net(dummy)
         traced=torch.jit.trace(net,dummy,check_trace=False)
     converted=ct.convert(traced,convert_to="mlprogram",minimum_deployment_target=ct.target.iOS16,
+        compute_precision=ct.precision.FLOAT32,
         inputs=[ct.ImageType(name="image",shape=dummy.shape,scale=1/255,color_layout=ct.colorlayout.RGB)],
         outputs=[ct.TensorType(name="primary"),ct.TensorType(name="auxiliary")])
     converted.user_defined_metadata["checkpoint_sha256"]=C7

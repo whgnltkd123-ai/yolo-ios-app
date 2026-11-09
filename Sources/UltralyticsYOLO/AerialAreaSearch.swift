@@ -35,20 +35,27 @@ public enum AerialAreaSearch {
     guard metadata?["checkpoint_sha256"] == checkpoint, metadata?["area_schema"] == "c7-area-v1"
     else { throw Failure.model }
     let request = VNCoreMLRequest(model: try VNCoreMLModel(for: model))
-    request.imageCropAndScaleOption = .scaleFit
+    request.imageCropAndScaleOption = .scaleFill
+    let extent = CGRect(x: 0, y: 0, width: 640, height: 640)
+    let gray = CGFloat(114) / 255
+    let padding = CIImage(color: CIColor(red: gray, green: gray, blue: gray)).cropped(to: extent)
 
     func analyze(_ rect: CGRect, floor: Float = 0.30) throws -> (primary: [Box], auxiliary: [Box]) {
       try Task.checkCancellation()
       let ciRect = CGRect(x: rect.minX, y: size.height - rect.maxY, width: rect.width, height: rect.height)
       let local = image.cropped(to: ciRect).transformed(by: CGAffineTransform(translationX: -ciRect.minX, y: -ciRect.minY))
-      try VNImageRequestHandler(ciImage: local, orientation: .up, options: [:]).perform([request])
+      let gain = min(640 / rect.width, 640 / rect.height)
+      let width = (rect.width * gain).rounded(.toNearestOrEven)
+      let height = (rect.height * gain).rounded(.toNearestOrEven)
+      let padX = floor((640 - width) / 2), padY = floor((640 - height) / 2)
+      let resized = local.transformed(by: CGAffineTransform(scaleX: width/rect.width, y: height/rect.height))
+        .transformed(by: CGAffineTransform(translationX: padX, y: 640-height-padY))
+      let tensorImage = resized.composited(over: padding).cropped(to: extent)
+      try VNImageRequestHandler(ciImage: tensorImage, orientation: .up, options: [:]).perform([request])
       let outputs = request.results as? [VNCoreMLFeatureValueObservation] ?? []
       func decode(_ name: String, threshold: Float) throws -> [Box] {
         guard let a = outputs.first(where: { $0.featureName == name })?.featureValue.multiArrayValue,
           a.shape.map({ $0.intValue }) == [1, 300, 9] else { throw Failure.output }
-        let gain = min(640 / rect.width, 640 / rect.height)
-        let padX = ((640 - (rect.width * gain).rounded()) / 2 - 0.1).rounded()
-        let padY = ((640 - (rect.height * gain).rounded()) / 2 - 0.1).rounded()
         let names = ["drone", "bird", "airplane"]
         var boxes = [Box]()
         for i in 0..<300 {
@@ -112,7 +119,10 @@ public enum AerialAreaSearch {
   }
 
   private static func overlap(_ a: Box, _ b: Box) -> CGFloat {
-    ObjectDetector.overlap(a.xywh, b.xywh)
+    let p = a.xywh, q = b.xywh, r = p.intersection(q)
+    guard !r.isEmpty else { return 0 }
+    let area = r.width*r.height
+    return area/(p.width*p.height + q.width*q.height-area)
   }
 
   private static func separate(_ box: Box, _ existing: [Box]) -> Bool {

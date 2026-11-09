@@ -202,8 +202,12 @@ workflows:
           mkdir -p "$CM_BUILD_DIR/build/yolo26-drone-package/Payload"
           cp -R "$APP" "$CM_BUILD_DIR/build/yolo26-drone-package/Payload/"
           cd "$CM_BUILD_DIR/build/yolo26-drone-package"
+          test -s "Payload/YOLOiOSApp.app/Models/Area/C7Area.mlmodelc/model.mil"
           /usr/bin/zip -qry "$CM_BUILD_DIR/build/YOLO26-Drone-Alert-unsigned.ipa" Payload
+          unzip -tq "$CM_BUILD_DIR/build/YOLO26-Drone-Alert-unsigned.ipa"
+          shasum -a 256 "$CM_BUILD_DIR/build/YOLO26-Drone-Alert-unsigned.ipa"
     artifacts:
+      - build/area-export/parity.json
       - build/YOLO26-Drone-Alert-unsigned.ipa
       - build/coreml-conversion-check.json
       - build/DerivedData/Build/Products/Release-iphoneos/*.app
