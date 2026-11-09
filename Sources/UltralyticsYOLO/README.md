@@ -328,9 +328,9 @@ outputs with Swift-side NMS, or `nms=True` for embedded NMS on supported tasks. 
 Neural Engine, GPU and CPU; `useGpu: false` pins it to the CPU. The predictors decode the actual Vision observations and tensor
 layouts of either backend by shape, so existing YOLO11 and YOLO26 assets and both heads remain supported.
 
-## Aerial still-photo review
+## Automatic aerial verification
 
-`YOLOView.captureAreaPhoto` returns a camera still without overlays. `AerialAreaSearch.inspect` uses the bundled c7 two-head Core ML export to inspect the full frame, four overlapping regions, and up to two additional confirmation regions. `AerialAreaReview` provides original detections, search candidates, and rechecked drone suspicions in the oriented photo's pixel coordinates. The photo initially shows only original full-frame labels. Its optional review overlay marks rechecked locations for visual inspection. Uncorroborated search boxes are never shown, and review locations never raise alerts.
+For the app's three-class c7 Core ML checkpoint, `YOLOView.setDroneRecheck(_:)` enables automatic crop verification on observed unidentified boxes. Only a spatially matched, unambiguous crop result can change that same box. A crop-only drone is capped at suspicion; a normal full-frame decision is required for confirmation.
 
 ## 🤝 Contributing
 

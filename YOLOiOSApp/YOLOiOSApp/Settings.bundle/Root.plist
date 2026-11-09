@@ -48,11 +48,11 @@
                 <key>Type</key>
                 <string>PSToggleSwitchSpecifier</string>
                 <key>Title</key>
-                <string>드론 후보 재확인 (1번 모드)</string>
+                <string>미확인 물체 자동 확대</string>
                 <key>Key</key>
-                <string>drone_crop_recheck</string>
+                <string>aerial_unknown_zoom</string>
                 <key>DefaultValue</key>
-                <false/>
+                <true/>
             </dict>
         </array>
     </dict>

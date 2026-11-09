@@ -28,58 +28,56 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
 
   override func processCameraObservations(for request: VNRequest, buffer: CVPixelBuffer) {
     guard droneRecheckEnabled, isRecallCheckpoint, hasAerialClassScores,
-      abs(confidenceThreshold - 0.30) < 0.00001, let request = request as? VNCoreMLRequest
+      let request = request as? VNCoreMLRequest
     else {
       super.processCameraObservations(for: request, buffer: buffer)
       return
     }
-    let previous = retainsWeakAerialDetections
-    retainsWeakAerialDetections = true
-    let fullFrame = decodeBoxes(from: request)
-    retainsWeakAerialDetections = previous
-    var visible = fullFrame.filter { $0.conf > Float(confidenceThreshold) }
-    if visible.count < numItemsThreshold,
-      let extra = recheckedDrone(in: fullFrame, visible: visible, buffer: buffer, request: request)
-    {
-      visible.append(extra)
+    var boxes = decodeBoxes(from: request)
+    if let i = boxes.firstIndex(where: {
+      $0.conf >= 0.30 && $0.classScores != nil && $0.aerialDisplayLabel == "미확인 물체"
+    }) {
+      boxes[i] = recheckUnknown(at: i, in: boxes, buffer: buffer, request: request)
     }
     markInferenceEnd()
-    deliver(visible)
+    deliver(boxes)
   }
 
-  private func recheckedDrone(
-    in boxes: [Box], visible: [Box], buffer: CVPixelBuffer, request: VNCoreMLRequest
-  ) -> Box? {
-    func separate(_ rect: CGRect) -> Bool {
-      !visible.contains { Self.overlap(rect, $0.xywh) >= 0.25 }
-    }
-    // End-to-end TopK is already sorted by score; use at most one crop per frame.
-    guard let seed = boxes.first(where: {
-      $0.cls == "drone" && $0.conf >= 0.10 && $0.conf < 0.30 && separate($0.xywh)
-    }) else { return nil }
-
-    let size = inputSize
+  private func recheckUnknown(
+    at index: Int, in boxes: [Box], buffer: CVPixelBuffer, request: VNCoreMLRequest
+  ) -> Box {
+    let seed = boxes[index], size = inputSize
     let crop = Self.recheckRect(around: seed.xywh, in: size)
-    // Detector boxes are top-left based; Core Image's origin is bottom-left.
-    let sourceRect = CGRect(x: crop.minX, y: size.height - crop.maxY, width: crop.width, height: crop.height)
-    let image = CIImage(cvPixelBuffer: buffer).cropped(to: sourceRect)
-      .transformed(by: CGAffineTransform(translationX: -sourceRect.minX, y: -sourceRect.minY))
+    guard crop.contains(seed.xywh), !seed.xywh.isEmpty else { return seed }
+
+    // Detector geometry is top-left based; the source is the observed camera buffer.
+    let source = CGRect(x: crop.minX, y: size.height - crop.maxY, width: crop.width, height: crop.height)
+    let image = CIImage(cvPixelBuffer: buffer).cropped(to: source)
+      .transformed(by: CGAffineTransform(translationX: -source.minX, y: -source.minY))
     inputSize = crop.size
     defer { inputSize = size }
     let handler = VNImageRequestHandler(ciImage: image, orientation: .up, options: [:])
-    guard perform(request, with: handler, errorMessage: "Drone crop recheck failed") else { return nil }
-    for local in decodeBoxes(from: request) {
-      guard local.cls == "drone",
-        local.aerialDisplayLabel == "드론" || local.aerialDisplayLabel == "드론 의심"
-      else { continue }
-      let rect = local.xywh.offsetBy(dx: crop.minX, dy: crop.minY)
-      guard Self.overlap(rect, seed.xywh) >= 0.30, separate(rect) else { continue }
-      let normalized = CGRect(x: rect.minX / size.width, y: rect.minY / size.height,
-        width: rect.width / size.width, height: rect.height / size.height)
-      return Box(index: local.index, cls: local.cls, conf: local.conf, xywh: rect,
-        xywhn: normalized, classScores: local.classScores, isCropRecheck: true)
+    guard perform(request, with: handler, errorMessage: "Unknown object zoom failed") else { return seed }
+
+    return Self.zoomDecision(at: index, in: boxes, local: decodeBoxes(from: request), crop: crop)
+  }
+
+  static func zoomDecision(at index: Int, in boxes: [Box], local: [Box], crop: CGRect) -> Box {
+    let seed = boxes[index]
+    let matches = local.filter { box in
+      guard box.conf >= 0.30 else { return false }
+      let rect = box.xywh.offsetBy(dx: crop.minX, dy: crop.minY)
+      return overlap(rect, seed.xywh) >= 0.50 && !boxes.indices.contains {
+        $0 != index && boxes[$0].conf >= 0.30 && overlap(rect, boxes[$0].xywh) >= 0.25
+      }
     }
-    return nil
+    guard matches.count == 1, let match = matches.first, match.classScores != nil,
+      let label = match.aerialDisplayLabel, ["드론", "새", "비행기"].contains(label),
+      label != "드론" || seed.cls == "drone"
+    else { return seed }
+    // The crop supplies class evidence only; preserve the observed box and tracker geometry.
+    return Box(index: match.index, cls: match.cls, conf: match.conf, xywh: seed.xywh,
+      xywhn: seed.xywhn, classScores: match.classScores, isCropRecheck: true)
   }
 
   static func recheckRect(around box: CGRect, in size: CGSize) -> CGRect {

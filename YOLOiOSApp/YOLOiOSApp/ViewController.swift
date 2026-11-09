@@ -168,7 +168,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
   }
 
   private let aerialBoxesButton = UIButton(type: .system)
-  private let areaReviewButton = UIButton(type: .system)
   private let droneAlertButton = UIButton(type: .system)
   private let droneAlertStatusLabel = UILabel()
   private let droneAlertAudio = DroneAlertSoundPlayer()
@@ -187,17 +186,9 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var broadcastEnabled = false
 
   private func installDroneAlertControls() {
-    areaReviewButton.setTitle("정밀 탐색", for: .normal)
-    areaReviewButton.setTitleColor(.white, for: .normal)
-    areaReviewButton.backgroundColor = UIColor.black.withAlphaComponent(0.76)
-    areaReviewButton.layer.cornerRadius = 8
-    areaReviewButton.contentEdgeInsets = UIEdgeInsets(top: 7, left: 10, bottom: 7, right: 10)
-    areaReviewButton.addTarget(self, action: #selector(openAreaReview), for: .touchUpInside)
-    let displayControls = UIStackView(arrangedSubviews: [aerialBoxesButton, areaReviewButton])
-    displayControls.spacing = 6
     let panel = UIStackView(arrangedSubviews: [
       recognitionModes, trackingStatus,
-      displayControls, droneAlertButton,
+      aerialBoxesButton, droneAlertButton,
       monitoringButton, droneAlertStatusLabel, monitoringStatusLabel,
     ])
     panel.axis = .vertical
@@ -270,31 +261,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
       aerialOnly
       ? "공중 객체만 표시 중. 전체 객체 표시하기"
       : "모든 객체 표시 중. 공중 객체만 표시하기"
-  }
-
-  @objc private func openAreaReview() {
-    guard !isLoadingModel, currentTask == "Detect", currentModelName.contains("aerial3"),
-      yoloView.aerialRecognitionMode == .original else {
-      trackingStatus.text = "정밀 탐색은 1번 모드의 공중 탐지 모델에서 사용할 수 있습니다."
-      return
-    }
-    areaReviewButton.isEnabled = false
-    yoloView.captureAreaPhoto { [weak self] photo in
-      guard let self else { return }
-      self.areaReviewButton.isEnabled = true
-      guard let photo, self.view.window != nil, self.presentedViewController == nil else {
-        self.trackingStatus.text = "정밀 탐색용 사진을 촬영하지 못했습니다."
-        return
-      }
-      self.yoloView.setInferenceFlag(ok: false)
-      let review = AreaReviewController(photo: photo) { [weak self] in
-        guard let self, !self.isLoadingModel, !self.hasExternalScreen() else { return }
-        self.yoloView.setInferenceFlag(ok: true)
-      }
-      let nav = UINavigationController(rootViewController: review)
-      nav.modalPresentationStyle = .fullScreen
-      self.present(nav, animated: true)
-    }
   }
 
   @objc private func recognitionModeChanged() {
@@ -615,7 +581,8 @@ class ViewController: UIViewController, YOLOViewDelegate {
     appTasks.forEach { modelsForTask[$0.name] = getModelFiles(in: $0.folder) }
 
     setupModelActions()
-    yoloView.setDroneRecheck(UserDefaults.standard.bool(forKey: "drone_crop_recheck"))
+    UserDefaults.standard.register(defaults: ["aerial_unknown_zoom": true])
+    yoloView.setDroneRecheck(UserDefaults.standard.bool(forKey: "aerial_unknown_zoom"))
 
     currentTask = appTasks.first { $0.yoloTask == Constants.defaultTask }!.name
 
@@ -632,7 +599,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
       forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
     ) { [weak self] _ in
       guard let self = self else { return }
-      self.yoloView.setDroneRecheck(UserDefaults.standard.bool(forKey: "drone_crop_recheck"))
+      self.yoloView.setDroneRecheck(UserDefaults.standard.bool(forKey: "aerial_unknown_zoom"))
       guard !self.isLoadingModel,
         preferredModelExtension != remoteModelExtension
       else { return }

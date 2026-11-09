@@ -129,7 +129,7 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       boundingBoxViews.forEach { $0.hide() }
     }
   }
-  /// Enables same-model local verification on weak drone proposals in original mode.
+  /// Enables automatic same-model crop verification of visible unidentified aerial objects.
   public func setDroneRecheck(_ enabled: Bool) {
     videoCapture.setDroneRecheck(enabled)
   }
@@ -1436,11 +1436,6 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     case .builtInTelephotoCamera: return "Telephoto camera"
     default: return device.localizedName
     }
-  }
-
-  /// Returns an original still without drawing detector overlays into the input.
-  public func captureAreaPhoto(completion: @escaping (UIImage?) -> Void) {
-    videoCapture.capturePhoto(analyze: false) { image, _ in completion(image) }
   }
 
   public func capturePhoto(completion: @escaping (UIImage?) -> Void) {

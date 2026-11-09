@@ -10,7 +10,6 @@
 		A31000000000000000000000 /* AerialMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32000000000000000000000 /* AerialMonitoring.swift */; };
 		A31000000000000000000001 /* RemoteDroneAlerts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32000000000000000000001 /* RemoteDroneAlerts.swift */; };
 		A31000000000000000000002 /* EvidenceGalleryController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32000000000000000000002 /* EvidenceGalleryController.swift */; };
-		A31000000000000000000003 /* AreaReviewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32000000000000000000003 /* AreaReviewController.swift */; };
 		633BC6FB22EDE73D00821BCA /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 633BC6FA22EDE73D00821BCA /* Settings.bundle */; };
 		636EFCAA21E62DD300DE43BC /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636EFC9C21E62DD300DE43BC /* ViewController.swift */; };
 		636EFCAB21E62DD300DE43BC /* ViewController+ExternalDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636EFC9D21E62DD300DE43BC /* ViewController+ExternalDisplay.swift */; };
@@ -33,7 +32,6 @@
 		A32000000000000000000000 /* AerialMonitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AerialMonitoring.swift; sourceTree = "<group>"; };
 		A32000000000000000000001 /* RemoteDroneAlerts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDroneAlerts.swift; sourceTree = "<group>"; };
 		A32000000000000000000002 /* EvidenceGalleryController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceGalleryController.swift; sourceTree = "<group>"; };
-		A32000000000000000000003 /* AreaReviewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaReviewController.swift; sourceTree = "<group>"; };
 		6323C44D22186177008AE681 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		6323C44F22186177008AE681 /* Main.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = Main.storyboard; sourceTree = "<group>"; };
 		632892DF22EB3DB100A12D9C /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.info; path = Info.plist; sourceTree = "<group>"; };
@@ -75,7 +73,6 @@
 				A32000000000000000000000 /* AerialMonitoring.swift */,
 				A32000000000000000000001 /* RemoteDroneAlerts.swift */,
 				A32000000000000000000002 /* EvidenceGalleryController.swift */,
-				A32000000000000000000003 /* AreaReviewController.swift */,
 				73D95D152D45DA510050E640 /* ModelDownloadManager.swift */,
 				73D95D1A2D45DB800050E640 /* RemoteModels.swift */,
 				6323C44D22186177008AE681 /* LaunchScreen.storyboard */,
@@ -248,7 +245,6 @@
 				A31000000000000000000000 /* AerialMonitoring.swift in Sources */,
 				A31000000000000000000001 /* RemoteDroneAlerts.swift in Sources */,
 				A31000000000000000000002 /* EvidenceGalleryController.swift in Sources */,
-				A31000000000000000000003 /* AreaReviewController.swift in Sources */,
 				636EFCAB21E62DD300DE43BC /* ViewController+ExternalDisplay.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
