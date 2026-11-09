@@ -23,6 +23,79 @@ import Vision
 /// - SeeAlso: `Segmenter` for models that also produce pixel-level masks.
 public final class ObjectDetector: BasePredictor, @unchecked Sendable {
 
+  var isRecallCheckpoint = false
+  var droneRecheckEnabled = false
+
+  override func processCameraObservations(for request: VNRequest, buffer: CVPixelBuffer) {
+    guard droneRecheckEnabled, isRecallCheckpoint, hasAerialClassScores,
+      abs(confidenceThreshold - 0.30) < 0.00001, let request = request as? VNCoreMLRequest
+    else {
+      super.processCameraObservations(for: request, buffer: buffer)
+      return
+    }
+    let previous = retainsWeakAerialDetections
+    retainsWeakAerialDetections = true
+    let fullFrame = decodeBoxes(from: request)
+    retainsWeakAerialDetections = previous
+    var visible = fullFrame.filter { $0.conf > Float(confidenceThreshold) }
+    if visible.count < numItemsThreshold,
+      let extra = recheckedDrone(in: fullFrame, visible: visible, buffer: buffer, request: request)
+    {
+      visible.append(extra)
+    }
+    markInferenceEnd()
+    deliver(visible)
+  }
+
+  private func recheckedDrone(
+    in boxes: [Box], visible: [Box], buffer: CVPixelBuffer, request: VNCoreMLRequest
+  ) -> Box? {
+    func separate(_ rect: CGRect) -> Bool {
+      !visible.contains { Self.overlap(rect, $0.xywh) >= 0.25 }
+    }
+    // End-to-end TopK is already sorted by score; use at most one crop per frame.
+    guard let seed = boxes.first(where: {
+      $0.cls == "drone" && $0.conf >= 0.10 && $0.conf < 0.30 && separate($0.xywh)
+    }) else { return nil }
+
+    let size = inputSize
+    let crop = Self.recheckRect(around: seed.xywh, in: size)
+    // Detector boxes are top-left based; Core Image's origin is bottom-left.
+    let sourceRect = CGRect(x: crop.minX, y: size.height - crop.maxY, width: crop.width, height: crop.height)
+    let image = CIImage(cvPixelBuffer: buffer).cropped(to: sourceRect)
+      .transformed(by: CGAffineTransform(translationX: -sourceRect.minX, y: -sourceRect.minY))
+    inputSize = crop.size
+    defer { inputSize = size }
+    let handler = VNImageRequestHandler(ciImage: image, orientation: .up, options: [:])
+    guard perform(request, with: handler, errorMessage: "Drone crop recheck failed") else { return nil }
+    for local in decodeBoxes(from: request) {
+      guard local.cls == "drone",
+        local.aerialDisplayLabel == "드론" || local.aerialDisplayLabel == "드론 의심"
+      else { continue }
+      let rect = local.xywh.offsetBy(dx: crop.minX, dy: crop.minY)
+      guard Self.overlap(rect, seed.xywh) >= 0.30, separate(rect) else { continue }
+      let normalized = CGRect(x: rect.minX / size.width, y: rect.minY / size.height,
+        width: rect.width / size.width, height: rect.height / size.height)
+      return Box(index: local.index, cls: local.cls, conf: local.conf, xywh: rect,
+        xywhn: normalized, classScores: local.classScores, isCropRecheck: true)
+    }
+    return nil
+  }
+
+  static func recheckRect(around box: CGRect, in size: CGSize) -> CGRect {
+    let w = ceil(size.width / 2), h = ceil(size.height / 2)
+    return CGRect(x: min(max(0, (box.midX - w / 2).rounded(.toNearestOrEven)), size.width - w),
+      y: min(max(0, (box.midY - h / 2).rounded(.toNearestOrEven)), size.height - h),
+      width: w, height: h)
+  }
+
+  private static func overlap(_ a: CGRect, _ b: CGRect) -> CGFloat {
+    let r = a.intersection(b)
+    guard !r.isEmpty else { return 0 }
+    let area = r.width * r.height
+    return area / (a.width * a.height + b.width * b.height - area)
+  }
+
   /// Processes the results from the Vision framework's object detection request.
   ///
   /// Decodes boxes from `request.results`, converts them to image-space coordinates, and notifies the results
@@ -33,7 +106,10 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
   ///   - error: Any error that occurred during the Vision request.
   override func processObservations(for request: VNRequest, _ error: Error?) {
     markInferenceEnd()
-    let boxes = decodeBoxes(from: request)
+    deliver(decodeBoxes(from: request))
+  }
+
+  private func deliver(_ boxes: [Box]) {
     self.updateTime()
     var result = YOLOResult(
       orig_shape: inputSize, boxes: boxes, speed: self.t2, fps: 1 / self.t4, names: labels)

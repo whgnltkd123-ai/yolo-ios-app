@@ -135,6 +135,9 @@ public struct Box: @unchecked Sendable {
   /// Missing scores are not zero and cannot establish a drone-versus-bird margin.
   public var classScores: [String: Float]? = nil
 
+  /// A drone found only on a second view can trigger a suspicion, never a confirmation.
+  var isCropRecheck = false
+
   /// Single-frame display decision, not a calibrated probability or tracked identity.
   /// Missing competitor scores must never be interpreted as zero.
   public var aerialDisplayLabel: String? {
@@ -162,7 +165,7 @@ public struct Box: @unchecked Sendable {
     {
       return "미확인 물체"
     }
-    if selected >= 0.60 { return isDrone ? "드론" : "새" }
+    if selected >= 0.60 && !(isDrone && isCropRecheck) { return isDrone ? "드론" : "새" }
     return isDrone ? "드론 의심" : "새 의심"
   }
 }

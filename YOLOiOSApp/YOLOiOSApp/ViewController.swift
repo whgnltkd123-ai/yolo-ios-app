@@ -581,6 +581,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     appTasks.forEach { modelsForTask[$0.name] = getModelFiles(in: $0.folder) }
 
     setupModelActions()
+    yoloView.setDroneRecheck(UserDefaults.standard.bool(forKey: "drone_crop_recheck"))
 
     currentTask = appTasks.first { $0.yoloTask == Constants.defaultTask }!.name
 
@@ -596,7 +597,9 @@ class ViewController: UIViewController, YOLOViewDelegate {
     NotificationCenter.default.addObserver(
       forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
     ) { [weak self] _ in
-      guard let self = self, !self.isLoadingModel,
+      guard let self = self else { return }
+      self.yoloView.setDroneRecheck(UserDefaults.standard.bool(forKey: "drone_crop_recheck"))
+      guard !self.isLoadingModel,
         preferredModelExtension != remoteModelExtension
       else { return }
       remoteModelExtension = preferredModelExtension

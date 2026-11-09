@@ -200,6 +200,11 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
   let cameraQueue = DispatchQueue(label: "camera-queue")
   // All tracker/GMC state is owned by the existing background analysis queue.
   // Original mode allocates no tracker, sensor manager or thumbnail.
+  private var droneRecheckEnabled = false
+  func setDroneRecheck(_ enabled: Bool) {
+    cameraQueue.async { self.droneRecheckEnabled = enabled }
+  }
+
   private var recognitionMode = AerialRecognitionMode.original
   private var aerialTracker: AerialMotionTracker?
   private var cameraMotion: CameraMotionCompensation?
@@ -639,6 +644,7 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
       trackingGeometry = (size,zoom)
       motionMS = (CACurrentMediaTime()-trackingStarted)*1000
     }
+    (predictor as? ObjectDetector)?.droneRecheckEnabled = recognitionMode == .original && droneRecheckEnabled
     self.predictor?.isUpdating = true
     predictor.predict(sampleBuffer: sampleBuffer, onResultsListener: self, onInferenceTime: self)
     currentBuffer = nil

@@ -129,6 +129,11 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
       boundingBoxViews.forEach { $0.hide() }
     }
   }
+  /// Enables same-model local verification on weak drone proposals in original mode.
+  public func setDroneRecheck(_ enabled: Bool) {
+    videoCapture.setDroneRecheck(enabled)
+  }
+
   public func recordAerialPerformance(_ enabled: Bool) {
     videoCapture.recordAerialPerformance(enabled)
   }
