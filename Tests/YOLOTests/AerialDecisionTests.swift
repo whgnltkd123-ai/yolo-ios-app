@@ -83,6 +83,7 @@ final class AerialDecisionTests: XCTestCase {
     XCTAssertEqual(label([seed],[bird]),"새")
     XCTAssertEqual(label([seed],[drone]),"드론 의심")
     XCTAssertEqual(label([seed],[bird,drone]),"미확인 물체")
+    XCTAssertEqual(label([seed],[box("airplane",0.7,[0.51,0.04,0.7],localRect)]),"미확인 물체")
     XCTAssertEqual(label([seed,seed],[drone]),"미확인 물체")
     XCTAssertEqual(label([seed],[]),"미확인 물체")
     XCTAssertEqual(label([seed],[box("drone",0.52,[0.52,0.04,0],localRect)]),"미확인 물체")

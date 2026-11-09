@@ -106,7 +106,9 @@ final class AerialMotionTracker {
         } else { e.scores=nil }
       }
       var label="미확인 물체"
-      if !disrupted, b.conf >= 0.30, e.hits >= 3, let scores=e.scores,
+      if !disrupted, b.isCropRecheck, b.aerialDisplayLabel == "비행기" {
+        label = "비행기"
+      } else if !disrupted, b.conf >= 0.30, e.hits >= 3, let scores=e.scores,
          let current=b.aerialDisplayLabel {
         let winner=scores[0] >= scores[1] ? 0 : 1
         var proxy=Box(index:winner,cls:winner == 0 ? "drone":"bird",

@@ -71,8 +71,11 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
         $0 != index && boxes[$0].conf >= 0.30 && overlap(rect, boxes[$0].xywh) >= 0.25
       }
     }
-    guard matches.count == 1, let match = matches.first, match.classScores != nil,
+    guard matches.count == 1, let match = matches.first, let scores = match.classScores,
       let label = match.aerialDisplayLabel, ["드론", "새", "비행기"].contains(label),
+      scores.allSatisfy({ name, value in
+        name == match.cls || (value < 0.30 && match.conf - value > 0.200001)
+      }),
       label != "드론" || seed.cls == "drone"
     else { return seed }
     // The crop supplies class evidence only; preserve the observed box and tracker geometry.
