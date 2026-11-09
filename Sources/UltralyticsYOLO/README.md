@@ -330,7 +330,7 @@ layouts of either backend by shape, so existing YOLO11 and YOLO26 assets and bot
 
 ## Aerial still-photo review
 
-`YOLOView.captureAreaPhoto` returns a camera still without overlays. `AerialAreaSearch.inspect` uses the bundled c7 two-head Core ML export to inspect the full frame, four overlapping regions, and up to two additional confirmation regions. `AerialAreaReview` provides original detections, search candidates, and rechecked drone suspicions in the oriented photo's pixel coordinates. The app displays these on a zoomable photo separate from the live detector.
+`YOLOView.captureAreaPhoto` returns a camera still without overlays. `AerialAreaSearch.inspect` uses the bundled c7 two-head Core ML export to inspect the full frame, four overlapping regions, and up to two additional confirmation regions. `AerialAreaReview` provides original detections, search candidates, and rechecked drone suspicions in the oriented photo's pixel coordinates. The photo initially shows only original full-frame labels. Its optional review overlay marks rechecked locations for visual inspection. Uncorroborated search boxes are never shown, and review locations never raise alerts.
 
 ## 🤝 Contributing
 
