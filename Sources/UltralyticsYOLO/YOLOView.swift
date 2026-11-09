@@ -1438,6 +1438,11 @@ public final class YOLOView: UIView, VideoCaptureDelegate {
     }
   }
 
+  /// Returns an original still without drawing detector overlays into the input.
+  public func captureAreaPhoto(completion: @escaping (UIImage?) -> Void) {
+    videoCapture.capturePhoto(analyze: false) { image, _ in completion(image) }
+  }
+
   public func capturePhoto(completion: @escaping (UIImage?) -> Void) {
     if let pausedShareImage, !videoCapture.captureSession.isRunning {
       completion(renderShareImage(pausedShareImage))

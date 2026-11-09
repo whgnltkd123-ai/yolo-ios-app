@@ -511,7 +511,7 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
     }
   }
 
-  func capturePhoto(completion: @escaping (UIImage?, YOLOResult?) -> Void) {
+  func capturePhoto(analyze: Bool = true, completion: @escaping (UIImage?, YOLOResult?) -> Void) {
     cameraQueue.async { [weak self] in
       guard let self, self.captureSession.isRunning else {
         DispatchQueue.main.async { completion(nil, nil) }
@@ -535,6 +535,10 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
           self.photoCaptureProcessor = nil
           guard let image else {
             DispatchQueue.main.async { completion(nil, nil) }
+            return
+          }
+          if !analyze {
+            DispatchQueue.main.async { completion(image, nil) }
             return
           }
           self.pendingPhotoCapture = (image, completion)

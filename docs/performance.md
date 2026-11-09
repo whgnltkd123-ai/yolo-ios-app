@@ -495,3 +495,7 @@ Synthetic stationary-size-jitter/disruption and local warning-stage tests were a
 # Original-author ByteTrack replacement (2026-11-01)
 
 See [official-bytetrack.md](official-bytetrack.md) for pinned source, integration changes and pending validation. Mode1 and c7 detector weights remain unchanged. Device FPS, thermal behavior and ID continuity have not been verified; no performance claim is made.
+
+## On-demand aerial area review
+
+The precision-search button captures a still and runs original c7 on a separate work queue while live inference is suspended for review. Each search needs a full-frame pass and four tiles, plus at most one weak-seed check and two candidate checks. Live FPS, photo latency and thermals require physical-device measurements. Search candidates are shown for inspection and do not trigger alarms.
