@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="32700.99.1234" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="32700.99.1234" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
     <device id="retina5_9" orientation="portrait" appearance="light"/>
     <dependencies>
         <deployment identifier="iOS"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
         <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="22685"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
@@ -19,12 +20,19 @@
                         <rect key="frame" x="0.0" y="0.0" width="375" height="812"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" image="ultralytics_yolo_logotype.png" translatesAutoresizingMaskIntoConstraints="NO" id="CPK-0W-BZj">
-                                <rect key="frame" x="19" y="156" width="336" height="500"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMinX="YES" widthSizable="YES" flexibleMaxX="YES" flexibleMinY="YES" heightSizable="YES" flexibleMaxY="YES"/>
-                            </imageView>
+                            <label userInteractionEnabled="NO" contentMode="left" text="Made by 중령 김옥전, 소령 최현민, 대위 조휘상" textAlignment="right" numberOfLines="0" translatesAutoresizingMaskIntoConstraints="NO" id="CrD-la-001">
+                                <rect key="frame" x="100" y="757" width="265" height="13"/>
+                                <fontDescription key="fontDescription" type="system" pointSize="10"/>
+                                <color key="textColor" white="0.88" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                            </label>
                         </subviews>
-                        <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                        <viewLayoutGuide key="safeArea" id="CrD-sa-002"/>
+                        <color key="backgroundColor" white="0" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                        <constraints>
+                            <constraint firstItem="CrD-sa-002" firstAttribute="trailing" secondItem="CrD-la-001" secondAttribute="trailing" constant="10" id="CrD-tr-003"/>
+                            <constraint firstItem="CrD-sa-002" firstAttribute="bottom" secondItem="CrD-la-001" secondAttribute="bottom" constant="8" id="CrD-bo-004"/>
+                            <constraint firstItem="CrD-la-001" firstAttribute="leading" relation="greaterThanOrEqual" secondItem="CrD-sa-002" secondAttribute="leading" constant="10" id="CrD-le-005"/>
+                        </constraints>
                         <color key="tintColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                     </view>
                     <toolbarItems/>
@@ -35,7 +43,4 @@
             <point key="canvasLocation" x="50.399999999999999" y="373.89162561576359"/>
         </scene>
     </scenes>
-    <resources>
-        <image name="ultralytics_yolo_logotype.png" width="1406" height="394"/>
-    </resources>
 </document>

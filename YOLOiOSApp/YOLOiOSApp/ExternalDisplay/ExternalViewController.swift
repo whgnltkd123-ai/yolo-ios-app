@@ -16,7 +16,6 @@ class ExternalViewController: UIViewController, YOLOViewDelegate {
   private var labelName: UILabel!
   private var labelFPS: UILabel!
   private var segmentedControl: UISegmentedControl!
-  private var logoImageView: UIImageView!
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -54,11 +53,7 @@ class ExternalViewController: UIViewController, YOLOViewDelegate {
     segmentedControl = createSegmentedControl()
     view.addSubview(segmentedControl)
 
-    logoImageView = UIImageView(image: UIImage(named: "ultralytics_yolo_logotype"))
-    logoImageView.contentMode = .scaleAspectFit
-    logoImageView.alpha = 1.0
-    logoImageView.translatesAutoresizingMaskIntoConstraints = false
-    view.addSubview(logoImageView)
+    CameraCredit.install(in: view, above: view.safeAreaLayoutGuide.bottomAnchor)
 
     setupConstraints(scaleFactor: scaleFactor)
   }
@@ -136,12 +131,6 @@ class ExternalViewController: UIViewController, YOLOViewDelegate {
       segmentedControl.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.7),
       segmentedControl.heightAnchor.constraint(equalToConstant: 60),
 
-      logoImageView.trailingAnchor.constraint(
-        equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -margin),
-      logoImageView.bottomAnchor.constraint(
-        equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -margin),
-      logoImageView.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.2),
-      logoImageView.heightAnchor.constraint(equalTo: logoImageView.widthAnchor, multiplier: 0.3),
     ])
   }
 
@@ -195,7 +184,7 @@ class ExternalViewController: UIViewController, YOLOViewDelegate {
     ])
 
     // Re-add overlays so they sit above the YOLOView.
-    [logoImageView, labelName, labelFPS].forEach {
+    [labelName, labelFPS].forEach {
       $0?.removeFromSuperview()
       if let view = $0 { self.view.addSubview(view) }
     }
