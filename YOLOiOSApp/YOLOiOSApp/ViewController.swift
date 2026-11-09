@@ -614,7 +614,9 @@ class ViewController: UIViewController, YOLOViewDelegate {
     yoloView.shareButton.addTarget(self, action: #selector(shareButtonTapped), for: .touchUpInside)
     yoloView.delegate = self
     installDroneAlertControls()
-    CameraCredit.install(in: view, above: yoloView.sliderIoU.bottomAnchor)
+    // The toolbar symbols occupy its upper row. Keep the passive credit below
+    // them and just above the home indicator, outside the live preview.
+    CameraCredit.install(in: yoloView.toolbar, above: yoloView.toolbar.bottomAnchor, inset: 14)
     [yoloView.labelName, yoloView.labelFPS, yoloView.labelBreakdown].forEach { $0?.isHidden = true }
     [labelName, labelFPS, labelVersion].forEach { $0?.isHidden = true }
 
@@ -1681,22 +1683,22 @@ extension ViewController {
 }
 
 enum CameraCredit {
-  static func install(in view: UIView, above bottom: NSLayoutYAxisAnchor) {
+  static func install(in view: UIView, above bottom: NSLayoutYAxisAnchor, inset: CGFloat = 8) {
     let label = UILabel()
     label.text = "Made by 중령 김옥전, 소령 최현민, 대위 조휘상"
-    label.font = .systemFont(ofSize: 10, weight: .medium)
-    label.textColor = .white
-    label.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+    label.font = .systemFont(ofSize: 9)
+    label.textColor = .white.withAlphaComponent(0.78)
     label.textAlignment = .right
-    label.numberOfLines = 0
+    label.adjustsFontSizeToFitWidth = true
+    label.minimumScaleFactor = 0.85
     label.isUserInteractionEnabled = false
     label.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(label)
     let safeArea = view.safeAreaLayoutGuide
     NSLayoutConstraint.activate([
-      label.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor, constant: -10),
-      label.bottomAnchor.constraint(equalTo: bottom, constant: -8),
-      label.widthAnchor.constraint(lessThanOrEqualTo: safeArea.widthAnchor, multiplier: 0.43),
+      label.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor, constant: -16),
+      label.bottomAnchor.constraint(equalTo: bottom, constant: -inset),
+      label.leadingAnchor.constraint(greaterThanOrEqualTo: safeArea.leadingAnchor, constant: 16),
     ])
   }
 }
