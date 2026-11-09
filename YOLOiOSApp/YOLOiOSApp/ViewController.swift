@@ -146,7 +146,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
   private var breakdownText = ""
   @IBOutlet weak var labelVersion: UILabel!
   @IBOutlet weak var activityIndicator: UIActivityIndicatorView!
-  @IBOutlet weak var logoImage: UIImageView!
 
   let selection = UISelectionFeedbackGenerator()
 
@@ -502,7 +501,6 @@ class ViewController: UIViewController, YOLOViewDelegate {
   // MARK: - Constants
   private struct Constants {
     static let defaultTask = YOLOTask.detect
-    static let logoURL = "https://www.ultralytics.com"
     static let progressViewWidth: CGFloat = 200
   }
 
@@ -529,7 +527,7 @@ class ViewController: UIViewController, YOLOViewDelegate {
     modelsButton.isEnabled = !isLoadingModel && !scanning
     qrOverlay.isHidden = !scanning
     [
-      labelFPS, logoImage, yoloView.labelSliderConf, yoloView.sliderConf, yoloView.labelSliderIoU,
+      labelFPS, yoloView.labelSliderConf, yoloView.sliderConf, yoloView.labelSliderIoU,
       yoloView.sliderIoU,
     ]
     .forEach { $0?.isHidden = scanning }
@@ -613,10 +611,10 @@ class ViewController: UIViewController, YOLOViewDelegate {
     }
 
     // Wire up gestures and delegates.
-    logoImage.isHidden = true
     yoloView.shareButton.addTarget(self, action: #selector(shareButtonTapped), for: .touchUpInside)
     yoloView.delegate = self
     installDroneAlertControls()
+    CameraCredit.install(in: view, above: yoloView.sliderIoU.bottomAnchor)
     [yoloView.labelName, yoloView.labelFPS, yoloView.labelBreakdown].forEach { $0?.isHidden = true }
     [labelName, labelFPS, labelVersion].forEach { $0?.isHidden = true }
 
@@ -1221,28 +1219,15 @@ class ViewController: UIViewController, YOLOViewDelegate {
     present(alert, animated: true)
   }
 
-  @objc func logoButton() {
-    selection.selectionChanged()
-    if let link = URL(string: Constants.logoURL) {
-      UIApplication.shared.open(link)
-    }
-  }
-
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     loadingOverlayView?.frame = view.bounds
     alignWithThresholdSliders()
   }
 
-  /// Keeps the logo beside the sliders, near the content so screenshots keep it, and the version on the zoom row.
   private func alignWithThresholdSliders() {
-    guard logoImage != nil, yoloView != nil else { return }
-    // YOLOView lays out after this controller's pass; read its frames for the new bounds, not the previous ones.
+    guard yoloView != nil else { return }
     yoloView.layoutIfNeeded()
-    let sliderMidY = (yoloView.sliderConf.frame.midY + yoloView.sliderIoU.frame.midY) / 2
-    guard sliderMidY.isFinite, sliderMidY > 0 else { return }
-
-    logoImage.center = CGPoint(x: logoImage.center.x, y: sliderMidY + 6)
     labelVersion.frame.origin = CGPoint(
       x: yoloView.sliderConf.frame.minX,
       y: yoloView.labelZoom.frame.midY - labelVersion.frame.height / 2)
@@ -1693,4 +1678,25 @@ extension ViewController {
     labelFPS.attributedText = rendered
   }
 
+}
+
+enum CameraCredit {
+  static func install(in view: UIView, above bottom: NSLayoutYAxisAnchor) {
+    let label = UILabel()
+    label.text = "Made by 중령 김옥전, 소령 최현민, 대위 조휘상"
+    label.font = .systemFont(ofSize: 10, weight: .medium)
+    label.textColor = .white
+    label.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+    label.textAlignment = .right
+    label.numberOfLines = 0
+    label.isUserInteractionEnabled = false
+    label.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(label)
+    let safeArea = view.safeAreaLayoutGuide
+    NSLayoutConstraint.activate([
+      label.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor, constant: -10),
+      label.bottomAnchor.constraint(equalTo: bottom, constant: -8),
+      label.widthAnchor.constraint(lessThanOrEqualTo: safeArea.widthAnchor, multiplier: 0.43),
+    ])
+  }
 }
