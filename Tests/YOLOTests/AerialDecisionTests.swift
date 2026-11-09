@@ -1,9 +1,24 @@
+import UIKit
 import XCTest
 @testable import UltralyticsYOLO
 
 final class AerialDecisionTests: XCTestCase {
   private func detection(_ label: String, _ score: Float, _ scores: [String: Float]?) -> Box {
     Box(index: 0, cls: label, conf: score, xywh: .zero, xywhn: .zero, classScores: scores)
+  }
+
+  func testAreaReviewOnPublicPhoto() throws {
+    let folder = try XCTUnwrap(Bundle.module.url(forResource: "AreaReview", withExtension: nil))
+    let model = folder.appendingPathComponent("C7Area.mlmodelc")
+    guard FileManager.default.fileExists(atPath: model.path) else {
+      throw XCTSkip("Run the c7 area export to supply the compiled test resource.")
+    }
+    let image = try XCTUnwrap(UIImage(contentsOfFile: folder.appendingPathComponent("frame.jpg").path))
+    let review = try AerialAreaSearch.inspect(image, modelURL: model)
+    XCTAssertTrue(review.original.contains { $0.aerialDisplayLabel == "드론" && $0.xywh.contains(CGPoint(x: 558, y: 190)) })
+    // Bottom-left tile's new proposal must map to the original photo, not the tile origin.
+    XCTAssertTrue(review.candidates.contains { $0.xywh.contains(CGPoint(x: 265, y: 385)) })
+    XCTAssertTrue(review.verified.allSatisfy { $0.aerialDisplayLabel == "드론 의심" })
   }
 
   func testRecheckedDroneIsSuspectedEvenAtHighScore() {

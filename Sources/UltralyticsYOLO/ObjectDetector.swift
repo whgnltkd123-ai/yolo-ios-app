@@ -89,7 +89,7 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
       width: w, height: h)
   }
 
-  private static func overlap(_ a: CGRect, _ b: CGRect) -> CGFloat {
+  static func overlap(_ a: CGRect, _ b: CGRect) -> CGFloat {
     let r = a.intersection(b)
     guard !r.isEmpty else { return 0 }
     let area = r.width * r.height

@@ -328,6 +328,10 @@ outputs with Swift-side NMS, or `nms=True` for embedded NMS on supported tasks. 
 Neural Engine, GPU and CPU; `useGpu: false` pins it to the CPU. The predictors decode the actual Vision observations and tensor
 layouts of either backend by shape, so existing YOLO11 and YOLO26 assets and both heads remain supported.
 
+## Aerial still-photo review
+
+`YOLOView.captureAreaPhoto` returns a camera still without overlays. `AerialAreaSearch.inspect` uses the bundled c7 two-head Core ML export to inspect the full frame, four overlapping regions, and up to two additional confirmation regions. `AerialAreaReview` provides original detections, search candidates, and rechecked drone suspicions in the oriented photo's pixel coordinates. The photo initially shows only original full-frame labels. Its optional review overlay marks rechecked locations for visual inspection. Uncorroborated search boxes are never shown, and review locations never raise alerts.
+
 ## 🤝 Contributing
 
 Contributions are welcome! Whether it's bug reports, feature requests, or code contributions, please feel free to open an issue or submit a pull request on the [GitHub repository](https://github.com/ultralytics/yolo-ios-app). Check the [contributing guide](https://docs.ultralytics.com/help/contributing) for more details on how to get involved. We appreciate your help in making this package better! You can also join the conversation on [Discord](https://discord.com/invite/ultralytics).

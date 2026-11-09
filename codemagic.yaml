@@ -108,6 +108,9 @@ workflows:
         - pattern: fix/small-target-continuity
           include: true
           source: true
+        - pattern: feat/c7-area-review
+          include: true
+          source: true
         - pattern: feat/c7-drone-recheck
           include: true
           source: true
@@ -160,6 +163,14 @@ workflows:
           python -m pip install "ultralytics==8.4.183" "coremltools>=9,<11" "numpy<2.4" "certifi>=2025.4"
           python tools/import_trained_yolo26_drone.py
           test -f "YOLOiOSApp/Models/Detect/yolo26s-aerial3.mlpackage/Manifest.json"
+      - name: Export c7 area search and verify both Core ML outputs
+        script: |
+          set -euo pipefail
+          source "$CM_BUILD_DIR/.yolo26-drone-venv/bin/activate"
+          python tools/export_c7_area.py
+          test -d YOLOiOSApp/Models/Area/C7Area.mlmodelc
+          cp -R YOLOiOSApp/Models/Area/C7Area.mlmodelc Tests/YOLOTests/Resources/AreaReview/
+          test -f Tests/YOLOTests/Resources/AreaReview/frame.jpg
       - name: Build native YOLO26 iOS app with trained drone bird airplane weights
         script: |
           set -euo pipefail
@@ -175,7 +186,7 @@ workflows:
       - name: Verify aerial decisions on iOS Simulator
         script: |
           set -euo pipefail
-          case "$CM_BRANCH" in feat/tracking-evidence-alerts|feat/reinforced-aerial-model|feat/stable-aerial-tracking|feat/native-no-tracking-yolo26s|feat/native-motion-tracking|fix/small-target-continuity|fix/official-bytetrack-native|feat/camera-screen-credit|feat/c7-drone-recheck) ;; *) exit 0 ;; esac
+          case "$CM_BRANCH" in feat/tracking-evidence-alerts|feat/reinforced-aerial-model|feat/stable-aerial-tracking|feat/native-no-tracking-yolo26s|feat/native-motion-tracking|fix/small-target-continuity|fix/official-bytetrack-native|feat/camera-screen-credit|feat/c7-drone-recheck|feat/c7-area-review) ;; *) exit 0 ;; esac
           IOS_SIMULATOR=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if "iOS" in k for x in v if "iPhone" in x["name"] and x["isAvailable"]))')
           xcodebuild -scheme UltralyticsYOLO -sdk iphonesimulator \
             -destination "platform=iOS Simulator,id=$IOS_SIMULATOR,arch=arm64" \
@@ -191,8 +202,12 @@ workflows:
           mkdir -p "$CM_BUILD_DIR/build/yolo26-drone-package/Payload"
           cp -R "$APP" "$CM_BUILD_DIR/build/yolo26-drone-package/Payload/"
           cd "$CM_BUILD_DIR/build/yolo26-drone-package"
+          test -s "Payload/YOLOiOSApp.app/Models/Area/C7Area.mlmodelc/model.mil"
           /usr/bin/zip -qry "$CM_BUILD_DIR/build/YOLO26-Drone-Alert-unsigned.ipa" Payload
+          unzip -tq "$CM_BUILD_DIR/build/YOLO26-Drone-Alert-unsigned.ipa"
+          shasum -a 256 "$CM_BUILD_DIR/build/YOLO26-Drone-Alert-unsigned.ipa"
     artifacts:
+      - build/area-export/parity.json
       - build/YOLO26-Drone-Alert-unsigned.ipa
       - build/coreml-conversion-check.json
       - build/DerivedData/Build/Products/Release-iphoneos/*.app
