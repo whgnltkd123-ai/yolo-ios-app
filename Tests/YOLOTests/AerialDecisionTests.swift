@@ -6,6 +6,21 @@ final class AerialDecisionTests: XCTestCase {
     Box(index: 0, cls: label, conf: score, xywh: .zero, xywhn: .zero, classScores: scores)
   }
 
+  func testRecheckedDroneIsSuspectedEvenAtHighScore() {
+    var box = detection("drone", 0.88, ["drone": 0.88, "bird": 0.01, "airplane": 0.02])
+    box.isCropRecheck = true
+    XCTAssertEqual(box.aerialDisplayLabel, "드론 의심")
+    let result = YOLOResult(orig_shape: CGSize(width: 640, height: 512), boxes: [box], speed: 0, names: ["drone", "bird", "airplane"])
+    XCTAssertNil(result.confirmedAerialDrone)
+    XCTAssertEqual(result.aerialWarningLevel, 2)
+  }
+
+  func testRecheckCropClampsAtRightAndTopInPortrait() {
+    let crop = ObjectDetector.recheckRect(around: CGRect(x: 350, y: 5, width: 8, height: 12),
+      in: CGSize(width: 361, height: 641))
+    XCTAssertEqual(crop, CGRect(x: 180, y: 0, width: 181, height: 321))
+  }
+
   func testAmbiguousAndMissingScoresRemainUnknown() {
     XCTAssertEqual(detection("drone", 0.8, nil).aerialDisplayLabel, "미확인 물체")
     XCTAssertEqual(detection("drone", 0.6, ["drone": 0.6, "bird": 0.4]).aerialDisplayLabel, "미확인 물체")
