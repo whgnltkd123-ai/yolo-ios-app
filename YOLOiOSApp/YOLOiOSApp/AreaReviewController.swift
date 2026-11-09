@@ -7,6 +7,7 @@ final class AreaReviewController: UIViewController, UIScrollViewDelegate {
   private let scroll = UIScrollView()
   private let imageView = UIImageView()
   private let status = UILabel()
+  private let reviewLocations = CALayer()
   private let closeAction: () -> Void
   private var layoutSize = CGSize.zero
   private var scanTask: Task<Void, Never>?
@@ -53,11 +54,7 @@ final class AreaReviewController: UIViewController, UIScrollViewDelegate {
       do {
         let result = try AerialAreaSearch.inspect(input, modelURL: url)
         try Task.checkCancellation()
-        let annotated = Self.annotate(input, result: result)
-        await MainActor.run { [weak self] in
-          self?.imageView.image = annotated
-          self?.status.text = "추가 탐색 후보 \(result.candidates.count)개 · 재확인된 의심 \(result.verified.count)개\n흰색 기존 판정 · 노란색 탐색 후보 · 청록색 재확인 의심"
-        }
+        await MainActor.run { [weak self] in self?.display(result) }
       } catch is CancellationError {
         return
       } catch {
@@ -92,27 +89,42 @@ final class AreaReviewController: UIViewController, UIScrollViewDelegate {
     }
   }
 
-  private nonisolated static func annotate(_ photo: UIImage, result: AerialAreaReview) -> UIImage {
-    let factor = min(1,3840/max(result.size.width,result.size.height))
-    let size = CGSize(width:result.size.width*factor,height:result.size.height*factor)
-    let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
-    return UIGraphicsImageRenderer(size:size,format:format).image { context in
-      photo.draw(in:CGRect(origin:.zero,size:size))
-      let ctx = context.cgContext
-      func draw(_ box: Box, text: String, color: UIColor) {
-        let r = box.xywh.applying(CGAffineTransform(scaleX:factor,y:factor))
-        let font = UIFont.systemFont(ofSize:max(12,max(size.width,size.height)*0.008),weight:.semibold)
-        ctx.setStrokeColor(color.cgColor); ctx.setLineWidth(max(1.5,font.pointSize*0.12)); ctx.stroke(r)
-        let label = text as NSString
-        let attrs: [NSAttributedString.Key:Any] = [.font:font,.foregroundColor:color,.backgroundColor:UIColor.black.withAlphaComponent(0.75)]
-        let width = label.size(withAttributes:attrs).width
-        label.draw(at:CGPoint(x:max(0,min(r.minX,size.width-width)), y:max(0,r.minY-font.lineHeight)),withAttributes:attrs)
-      }
-      for b in result.original { draw(b,text:b.aerialDisplayLabel ?? b.cls,color:.white) }
-      for b in result.candidates {
-        let verified = result.verified.contains { $0.xywh == b.xywh }
-        draw(b,text:verified ? "재확인 의심" : "탐색 후보",color:verified ? .systemTeal : .systemYellow)
-      }
+  private func display(_ result: AerialAreaReview) {
+    let size = imageView.bounds.size
+    let factor = CGAffineTransform(scaleX: size.width / result.size.width, y: size.height / result.size.height)
+    let font = UIFont.systemFont(ofSize: max(12, max(size.width, size.height) * 0.008), weight: .semibold)
+    func draw(_ box: Box, _ text: String, _ color: UIColor, on parent: CALayer) {
+      let rect = box.xywh.applying(factor)
+      let outline = CALayer()
+      outline.frame = rect
+      outline.borderColor = color.cgColor
+      outline.borderWidth = max(1.5, font.pointSize * 0.12)
+      parent.addSublayer(outline)
+      let label = CATextLayer()
+      label.contentsScale = UIScreen.main.scale
+      label.string = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
+      label.backgroundColor = UIColor.black.withAlphaComponent(0.75).cgColor
+      let width = ceil((text as NSString).size(withAttributes: [.font: font]).width) + 2
+      label.frame = CGRect(x: max(0, min(rect.minX, size.width-width)), y: max(0, rect.minY-font.lineHeight),
+        width: width, height: ceil(font.lineHeight))
+      parent.addSublayer(label)
     }
+    for box in result.original {
+      draw(box, box.aerialDisplayLabel ?? box.cls, .white, on: imageView.layer)
+    }
+    status.text = "기존 모델 판정 표시"
+    guard !result.verified.isEmpty else { return }
+    reviewLocations.frame = imageView.bounds
+    reviewLocations.isHidden = true
+    imageView.layer.addSublayer(reviewLocations)
+    for box in result.verified { draw(box, "재검토 위치", .systemTeal, on: reviewLocations) }
+    navigationItem.rightBarButtonItem = UIBarButtonItem(title: "재검토 위치 보기", style: .plain,
+      target: self, action: #selector(toggleLocations))
+  }
+
+  @objc private func toggleLocations() {
+    reviewLocations.isHidden.toggle()
+    navigationItem.rightBarButtonItem?.title = reviewLocations.isHidden ? "재검토 위치 보기" : "재검토 위치 숨기기"
+    status.text = reviewLocations.isHidden ? "기존 모델 판정 표시" : "청록색은 확대해서 직접 확인할 위치입니다."
   }
 }

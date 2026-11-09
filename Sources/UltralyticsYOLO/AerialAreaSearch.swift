@@ -47,7 +47,7 @@ public enum AerialAreaSearch {
       let gain = min(640 / rect.width, 640 / rect.height)
       let width = (rect.width * gain).rounded(.toNearestOrEven)
       let height = (rect.height * gain).rounded(.toNearestOrEven)
-      let padX = floor((640 - width) / 2), padY = floor((640 - height) / 2)
+      let padX = ((640 - width) / 2).rounded(.down), padY = ((640 - height) / 2).rounded(.down)
       let resized = local.transformed(by: CGAffineTransform(scaleX: width/rect.width, y: height/rect.height))
         .transformed(by: CGAffineTransform(translationX: padX, y: 640-height-padY))
       let tensorImage = resized.composited(over: padding).cropped(to: extent)
@@ -111,7 +111,9 @@ public enum AerialAreaSearch {
         verified.append(suspect)
       }
     }
-    return AerialAreaReview(size: size, original: original, candidates: candidates, verified: verified)
+    // A weak crop belongs to manual review, even when it scored highly on its second view.
+    return AerialAreaReview(size: size, original: original.filter { !$0.isCropRecheck },
+      candidates: candidates, verified: original.filter(\.isCropRecheck) + verified)
   }
 
   private static func isDrone(_ b: Box) -> Bool {
@@ -119,10 +121,7 @@ public enum AerialAreaSearch {
   }
 
   private static func overlap(_ a: Box, _ b: Box) -> CGFloat {
-    let p = a.xywh, q = b.xywh, r = p.intersection(q)
-    guard !r.isEmpty else { return 0 }
-    let area = r.width*r.height
-    return area/(p.width*p.height + q.width*q.height-area)
+    ObjectDetector.overlap(a.xywh, b.xywh)
   }
 
   private static func separate(_ box: Box, _ existing: [Box]) -> Bool {
