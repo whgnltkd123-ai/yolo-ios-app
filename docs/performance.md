@@ -496,6 +496,6 @@ Synthetic stationary-size-jitter/disruption and local warning-stage tests were a
 
 See [official-bytetrack.md](official-bytetrack.md) for pinned source, integration changes and pending validation. Mode1 and c7 detector weights remain unchanged. Device FPS, thermal behavior and ID continuity have not been verified; no performance claim is made.
 
-## On-demand aerial area review
+## Automatic zoom for an unidentified object
 
-The precision-search button captures a still and runs original c7 on a separate work queue while live inference is suspended for review. Each search needs a full-frame pass and four tiles, plus at most one weak-seed check and two candidate checks. Live FPS, photo latency and thermals require physical-device measurements. On 270 labeled public frames with 98 drone boxes, original full-frame c7 found 78 with 21 false boxes. Counting all proposed search regions as drone decisions raised this to 84 with 54 false boxes. Limiting additions to rechecked regions gave 80 with 30 false boxes. The app shows original full-frame labels by default. Only explicit review reveals rechecked locations, with no extra detection or alarm. It never displays uncorroborated regions.
+The c7 camera detector rechecks at most one visible unidentified object on the observed frame, using a centered half-size crop of the source buffer. All three modes use the same decision before tracking and alerts. Frames without a qualifying observation incur no second inference. The app default is on; disable automatic zoom in iOS Settings to restore the model-sized input buffer. The camera preset and preview zoom stay unchanged. Native source buffers and the second pass may affect throughput; sustained iPhone 15 FPS, heat and field range remain unmeasured.

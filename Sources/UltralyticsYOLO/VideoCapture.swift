@@ -202,7 +202,11 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
   // Original mode allocates no tracker, sensor manager or thumbnail.
   private var droneRecheckEnabled = false
   func setDroneRecheck(_ enabled: Bool) {
-    cameraQueue.async { self.droneRecheckEnabled = enabled }
+    cameraQueue.async {
+      guard self.droneRecheckEnabled != enabled else { return }
+      self.droneRecheckEnabled = enabled
+      self.configureInferenceBufferSize()
+    }
   }
 
   private var recognitionMode = AerialRecognitionMode.original
@@ -511,7 +515,7 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
     }
   }
 
-  func capturePhoto(analyze: Bool = true, completion: @escaping (UIImage?, YOLOResult?) -> Void) {
+  func capturePhoto(completion: @escaping (UIImage?, YOLOResult?) -> Void) {
     cameraQueue.async { [weak self] in
       guard let self, self.captureSession.isRunning else {
         DispatchQueue.main.async { completion(nil, nil) }
@@ -535,10 +539,6 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
           self.photoCaptureProcessor = nil
           guard let image else {
             DispatchQueue.main.async { completion(nil, nil) }
-            return
-          }
-          if !analyze {
-            DispatchQueue.main.async { completion(image, nil) }
             return
           }
           self.pendingPhotoCapture = (image, completion)
@@ -583,6 +583,11 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
       return
     }
 
+    // The full pass still uses the model's normal input. Keep source detail for the local pass.
+    if droneRecheckEnabled, (predictor as? ObjectDetector)?.isRecallCheckpoint == true {
+      setOutputBufferSize(long: nativeBufferDimensions.long, short: nativeBufferDimensions.short)
+      return
+    }
     let formatDimensions = captureDevice.map {
       CMVideoFormatDescriptionGetDimensions($0.activeFormat.formatDescription)
     }
@@ -648,7 +653,7 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
       trackingGeometry = (size,zoom)
       motionMS = (CACurrentMediaTime()-trackingStarted)*1000
     }
-    (predictor as? ObjectDetector)?.droneRecheckEnabled = recognitionMode == .original && droneRecheckEnabled
+    (predictor as? ObjectDetector)?.droneRecheckEnabled = droneRecheckEnabled
     self.predictor?.isUpdating = true
     predictor.predict(sampleBuffer: sampleBuffer, onResultsListener: self, onInferenceTime: self)
     currentBuffer = nil
