@@ -302,8 +302,8 @@ public class BasePredictor: Predictor, @unchecked Sendable {
           mlModel.modelDescription
           .metadata[MLModelMetadataKey.creatorDefinedKey] as? [String: String]
 
-        (predictor as? ObjectDetector)?.isRecallCheckpoint =
-          userDefined?["checkpoint_sha256"] == "c7df126a039c1edde8d6b3e0c78be99f43e6770913eb1ff201976e2cf2505d26"
+        (predictor as? ObjectDetector)?.isFirstSightingCheckpoint = isRealTime
+          && userDefined?["checkpoint_sha256"] == "c7df126a039c1edde8d6b3e0c78be99f43e6770913eb1ff201976e2cf2505d26"
 
         // (2) Extract class labels
         predictor.labels = userDefined.map(Self.parseLabels(from:)) ?? []
@@ -383,10 +383,6 @@ public class BasePredictor: Predictor, @unchecked Sendable {
       isUpdating = false
       return
     }
-    processCameraObservations(for: request, buffer: pixelBuffer)
-  }
-
-  func processCameraObservations(for request: VNRequest, buffer: CVPixelBuffer) {
     processObservations(for: request, nil)
   }
 

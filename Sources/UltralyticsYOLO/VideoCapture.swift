@@ -174,6 +174,43 @@ extension AVCaptureVideoOrientation {
   }
 }
 
+/// Keeps only the previous analyzed frame. No ID, predicted box, or model rerun.
+struct FirstSighting {
+  private var previous: [CGRect] = []
+  private var lastTime = -Double.infinity
+  private var lastSize = CGSize.zero
+  private var lastZoom: CGFloat = 0
+
+  mutating func observation(in boxes: [Box], size: CGSize, time: Double, zoom: CGFloat) -> Int? {
+    let prior = previous
+    let canCompare = time > lastTime && time-lastTime <= 0.25 && size == lastSize && zoom == lastZoom
+    lastTime = time
+    lastSize = size
+    lastZoom = zoom
+    previous = boxes.compactMap { box in
+      guard box.conf >= 0.20, box.classScores != nil, box.cls == "drone" || box.cls == "bird",
+        !box.xywh.isEmpty else { return nil }
+      return box.xywh
+    }
+    guard canCompare, !prior.isEmpty, max(size.width,size.height) > 0 else { return nil }
+    let gain = 640 / max(size.width,size.height)
+    // Native end-to-end rows are already ranked. Permit at most the strongest separate small location.
+    guard let i = boxes.firstIndex(where: { b in
+      (0.20..<0.30).contains(b.conf) && b.classScores != nil && (b.cls == "drone" || b.cls == "bird")
+        && !b.xywh.isEmpty && min(b.xywh.width,b.xywh.height)*gain <= 32
+        && !boxes.contains { $0.conf >= 0.30 && Self.overlap(b.xywh,$0.xywh) >= 0.25 }
+    }), prior.contains(where: { Self.overlap(boxes[i].xywh,$0) >= 0.30 }) else { return nil }
+    return i
+  }
+
+  private static func overlap(_ a: CGRect, _ b: CGRect) -> CGFloat {
+    let common = a.intersection(b)
+    guard !common.isEmpty else { return 0 }
+    let area = common.width*common.height
+    return area/(a.width*a.height+b.width*b.height-area)
+  }
+}
+
 public final class VideoCapture: NSObject, @unchecked Sendable {
   public var predictor: Predictor? {
     didSet {
@@ -182,6 +219,7 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
       let fills = predictor.imageCropAndScaleOption != .scaleFit  // center crop or stretch
       cameraQueue.async { [weak self] in
         self?.aerialTracker?.reset()
+        self?.firstSighting = FirstSighting()
         predictor.retainsWeakAerialDetections = (self?.recognitionMode ?? .original) != .original
         self?.modelInputSize = modelInputSize
         self?.fillsModelInput = fills
@@ -200,20 +238,12 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
   let cameraQueue = DispatchQueue(label: "camera-queue")
   // All tracker/GMC state is owned by the existing background analysis queue.
   // Original mode allocates no tracker, sensor manager or thumbnail.
-  private var droneRecheckEnabled = false
-  func setDroneRecheck(_ enabled: Bool) {
-    cameraQueue.async {
-      guard self.droneRecheckEnabled != enabled else { return }
-      self.droneRecheckEnabled = enabled
-      self.configureInferenceBufferSize()
-    }
-  }
-
   private var recognitionMode = AerialRecognitionMode.original
   private var aerialTracker: AerialMotionTracker?
   private var cameraMotion: CameraMotionCompensation?
   private var motionEstimate = CameraMotionCompensation.Estimate()
   private var trackingTimestamp = 0.0
+  private var firstSighting = FirstSighting()
   private var trackingStarted = 0.0
   private var motionMS = 0.0
   private var trackingGeometry: (CGSize, Double)?
@@ -232,6 +262,7 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
     cameraQueue.async { [weak self] in
       guard let self else { return }
       self.recognitionMode = mode
+      self.firstSighting = FirstSighting()
       if self.performanceRecording {
         self.performanceStart = CACurrentMediaTime()
         self.performanceFrames = 0; self.performanceDropped = 0
@@ -292,6 +323,7 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
     sessionPreset: AVCaptureSession.Preset, position: AVCaptureDevice.Position,
     videoOrientation: AVCaptureVideoOrientation
   ) -> Bool {
+    firstSighting = FirstSighting()
     nativeBufferDimensions = nil
     captureSession.beginConfiguration()
     defer {
@@ -453,6 +485,7 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
     captureSession.addInput(newInput)
     videoInput = newInput
     captureDevice = device
+    firstSighting = FirstSighting()
     nativeBufferDimensions = nil
     videoOutput.videoSettings = [
       kCVPixelBufferPixelFormatTypeKey as String: NSNumber(value: kCVPixelFormatType_32BGRA)
@@ -583,11 +616,6 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
       return
     }
 
-    // The full pass still uses the model's normal input. Keep source detail for the local pass.
-    if droneRecheckEnabled, (predictor as? ObjectDetector)?.isRecallCheckpoint == true {
-      setOutputBufferSize(long: nativeBufferDimensions.long, short: nativeBufferDimensions.short)
-      return
-    }
     let formatDimensions = captureDevice.map {
       CMVideoFormatDescriptionGetDimensions($0.activeFormat.formatDescription)
     }
@@ -635,9 +663,14 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
     else { return }
     currentBuffer = pixelBuffer
     if performanceRecording { frameAnalysisStart = CACurrentMediaTime() }
+    trackingTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+    if let d = predictor as? ObjectDetector {
+      let standardFloor = abs(d.confidenceThreshold - (aerialTracker == nil ? 0.30 : 0.10)) < 0.00001
+      d.collectsFirstSightings = d.isFirstSightingCheckpoint && d.hasAerialClassScores && standardFloor
+      if !d.collectsFirstSightings { firstSighting = FirstSighting() }
+    }
     if let tracker = aerialTracker {
       trackingStarted = CACurrentMediaTime()
-      trackingTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
       (predictor as? BasePredictor)?.retainsWeakAerialDetections = true
       cameraMotion?.start()
       motionEstimate = cameraMotion?.estimate(pixelBuffer, time:trackingTimestamp,
@@ -653,7 +686,6 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
       trackingGeometry = (size,zoom)
       motionMS = (CACurrentMediaTime()-trackingStarted)*1000
     }
-    (predictor as? ObjectDetector)?.droneRecheckEnabled = droneRecheckEnabled
     self.predictor?.isUpdating = true
     predictor.predict(sampleBuffer: sampleBuffer, onResultsListener: self, onInferenceTime: self)
     currentBuffer = nil
@@ -669,6 +701,7 @@ public final class VideoCapture: NSObject, @unchecked Sendable {
       self.previewLayer?.connection?.videoOrientation = connection.videoOrientation
       self.configureVideoMirroring(
         self.previewLayer?.connection, isMirrored: connection.isVideoMirrored)
+      self.firstSighting = FirstSighting()
       self.configureInferenceBufferSize()
     }
   }
@@ -765,9 +798,16 @@ extension VideoCapture: ResultsListener, InferenceTimeListener {
   public func on(result: YOLOResult) {
     // Vision inference is synchronous on cameraQueue. Association runs here, never on main.
     var delivered = result
+    if (predictor as? ObjectDetector)?.collectsFirstSightings == true {
+      if let index = firstSighting.observation(in: result.boxes, size: result.orig_shape,
+        time: trackingTimestamp, zoom: captureDevice?.videoZoomFactor ?? 1) {
+        delivered.boxes[index].isFirstSighting = true
+      }
+      if aerialTracker == nil { delivered.boxes.removeAll { $0.conf <= 0.30 && !$0.isFirstSighting } }
+    }
     if let tracker = aerialTracker, result.names == ["drone", "bird", "airplane"] {
       let start = CACurrentMediaTime()
-      let objects = tracker.update(boxes:result.boxes,time:trackingTimestamp,
+      let objects = tracker.update(boxes:delivered.boxes,time:trackingTimestamp,
         translation:motionEstimate.translation,disrupted:motionEstimate.disrupted)
       delivered.tracking = AerialTrackingFrame(objects:objects,cameraState:motionEstimate.state,
         processingMS:motionMS+(CACurrentMediaTime()-start)*1000,

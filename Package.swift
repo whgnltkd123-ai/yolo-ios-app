@@ -37,7 +37,7 @@ let package = Package(
       dependencies: ["UltralyticsYOLO"],
       exclude: ["README.md"],
       resources: [
-        .copy("Resources/UnknownZoom"),
+        .copy("Resources/FirstSighting"),
         .copy("Resources/yolo26n.mlpackage"),
         .copy("Resources/yolo26n-cls.mlpackage"),
         .copy("Resources/yolo26n-depth.mlpackage"),

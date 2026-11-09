@@ -23,79 +23,8 @@ import Vision
 /// - SeeAlso: `Segmenter` for models that also produce pixel-level masks.
 public final class ObjectDetector: BasePredictor, @unchecked Sendable {
 
-  var isRecallCheckpoint = false
-  var droneRecheckEnabled = false
-
-  override func processCameraObservations(for request: VNRequest, buffer: CVPixelBuffer) {
-    guard droneRecheckEnabled, isRecallCheckpoint, hasAerialClassScores,
-      let request = request as? VNCoreMLRequest
-    else {
-      super.processCameraObservations(for: request, buffer: buffer)
-      return
-    }
-    var boxes = decodeBoxes(from: request)
-    if let i = boxes.firstIndex(where: {
-      $0.conf >= 0.30 && $0.classScores != nil && $0.aerialDisplayLabel == "미확인 물체"
-    }) {
-      boxes[i] = recheckUnknown(at: i, in: boxes, buffer: buffer, request: request)
-    }
-    markInferenceEnd()
-    deliver(boxes)
-  }
-
-  private func recheckUnknown(
-    at index: Int, in boxes: [Box], buffer: CVPixelBuffer, request: VNCoreMLRequest
-  ) -> Box {
-    let seed = boxes[index], size = inputSize
-    let crop = Self.recheckRect(around: seed.xywh, in: size)
-    guard crop.contains(seed.xywh), !seed.xywh.isEmpty else { return seed }
-
-    // Detector geometry is top-left based; the source is the observed camera buffer.
-    let source = CGRect(x: crop.minX, y: size.height - crop.maxY, width: crop.width, height: crop.height)
-    let image = CIImage(cvPixelBuffer: buffer).cropped(to: source)
-      .transformed(by: CGAffineTransform(translationX: -source.minX, y: -source.minY))
-    inputSize = crop.size
-    defer { inputSize = size }
-    let handler = VNImageRequestHandler(ciImage: image, orientation: .up, options: [:])
-    guard perform(request, with: handler, errorMessage: "Unknown object zoom failed") else { return seed }
-
-    return Self.zoomDecision(at: index, in: boxes, local: decodeBoxes(from: request), crop: crop)
-  }
-
-  static func zoomDecision(at index: Int, in boxes: [Box], local: [Box], crop: CGRect) -> Box {
-    let seed = boxes[index]
-    let matches = local.filter { box in
-      guard box.conf >= 0.30 else { return false }
-      let rect = box.xywh.offsetBy(dx: crop.minX, dy: crop.minY)
-      return overlap(rect, seed.xywh) >= 0.50 && !boxes.indices.contains {
-        $0 != index && boxes[$0].conf >= 0.30 && overlap(rect, boxes[$0].xywh) >= 0.25
-      }
-    }
-    guard matches.count == 1, let match = matches.first, let scores = match.classScores,
-      let label = match.aerialDisplayLabel, ["드론", "새", "비행기"].contains(label),
-      scores.allSatisfy({ name, value in
-        name == match.cls || (value < 0.30 && match.conf - value > 0.200001)
-      }),
-      label != "드론" || seed.cls == "drone"
-    else { return seed }
-    // The crop supplies class evidence only; preserve the observed box and tracker geometry.
-    return Box(index: match.index, cls: match.cls, conf: match.conf, xywh: seed.xywh,
-      xywhn: seed.xywhn, classScores: match.classScores, isCropRecheck: true)
-  }
-
-  static func recheckRect(around box: CGRect, in size: CGSize) -> CGRect {
-    let w = ceil(size.width / 2), h = ceil(size.height / 2)
-    return CGRect(x: min(max(0, (box.midX - w / 2).rounded(.toNearestOrEven)), size.width - w),
-      y: min(max(0, (box.midY - h / 2).rounded(.toNearestOrEven)), size.height - h),
-      width: w, height: h)
-  }
-
-  static func overlap(_ a: CGRect, _ b: CGRect) -> CGFloat {
-    let r = a.intersection(b)
-    guard !r.isEmpty else { return 0 }
-    let area = r.width * r.height
-    return area / (a.width * a.height + b.width * b.height - area)
-  }
+  var isFirstSightingCheckpoint = false
+  var collectsFirstSightings = false
 
   /// Processes the results from the Vision framework's object detection request.
   ///
@@ -107,10 +36,7 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
   ///   - error: Any error that occurred during the Vision request.
   override func processObservations(for request: VNRequest, _ error: Error?) {
     markInferenceEnd()
-    deliver(decodeBoxes(from: request))
-  }
-
-  private func deliver(_ boxes: [Box]) {
+    let boxes = decodeBoxes(from: request, initialCandidates: collectsFirstSightings)
     self.updateTime()
     var result = YOLOResult(
       orig_shape: inputSize, boxes: boxes, speed: self.t2, fps: 1 / self.t4, names: labels)
@@ -123,7 +49,7 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
   ///
   /// Handles both NMS-pipelined models (`VNRecognizedObjectObservation`, e.g. YOLO11) and NMS-free models
   /// (`VNCoreMLFeatureValueObservation` raw tensors, e.g. YOLO26).
-  private func decodeBoxes(from request: VNRequest) -> [Box] {
+  private func decodeBoxes(from request: VNRequest, initialCandidates: Bool = false) -> [Box] {
     // NMS-pipelined models (YOLO11 etc.) return VNRecognizedObjectObservation
     if let results = request.results as? [VNRecognizedObjectObservation] {
       var boxes = [Box]()
@@ -148,7 +74,7 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
       return boxes
     }
     // NMS-free models (YOLO26) return raw MLMultiArray tensors
-    return featureArrays(request).first.map(processRawResults) ?? []
+    return featureArrays(request).first.map { processRawResults($0, initialCandidates: initialCandidates) } ?? []
   }
 
   /// Runs synchronous object detection on a static image and returns the results.
@@ -186,7 +112,7 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
   ///
   /// - Parameter prediction: The raw MLMultiArray output from the model.
   /// - Returns: An array of detected boxes.
-  func processRawResults(_ prediction: MLMultiArray) -> [Box] {
+  func processRawResults(_ prediction: MLMultiArray, initialCandidates: Bool = false) -> [Box] {
     let shape = prediction.shape.map { $0.intValue }
     let strides = prediction.strides.map { $0.intValue }
     let confThreshold = Float(confidenceThreshold)
@@ -199,7 +125,7 @@ public final class ObjectDetector: BasePredictor, @unchecked Sendable {
       if isEnd2End {
         return processEnd2EndResults(
           pointer: pointer, shape: shape, strides: strides,
-          confThreshold: confThreshold)
+          confThreshold: initialCandidates ? min(confThreshold, Float(0.20).nextDown) : confThreshold)
       } else {
         return processTraditionalResults(
           pointer: pointer, shape: shape, strides: strides,

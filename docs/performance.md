@@ -496,6 +496,8 @@ Synthetic stationary-size-jitter/disruption and local warning-stage tests were a
 
 See [official-bytetrack.md](official-bytetrack.md) for pinned source, integration changes and pending validation. Mode1 and c7 detector weights remain unchanged. Device FPS, thermal behavior and ID continuity have not been verified; no performance claim is made.
 
-## Automatic zoom for an unidentified object
+## First sightings before manual zoom
 
-The c7 camera detector rechecks at most one visible unidentified object on the observed frame, using a centered half-size crop of the source buffer. All three modes use the same decision before tracking and alerts. Frames without a qualifying observation incur no second inference. The app default is on; disable automatic zoom in iOS Settings to restore the model-sized input buffer. The camera preset and preview zoom stay unchanged. Native source buffers and the second pass may affect throughput; sustained iPhone 15 FPS, heat and field range remain unmeasured.
+The live c7 detector uses one full-frame inference. At its standard sensitivity, a measured small bird/drone proposal from 20 to under 30 points may appear as an unidentified object when an overlapping observation exists in the preceding analyzed frame (up to 250 ms). Each frame can contribute one extra cue. Pinch and lens controls remain manual. No confirmation, ID, high-level warning or automatic evidence capture is created by the cue alone.
+
+On 270 sampled public frames, localization of drone boxes at IoU 0.5 moved from 80 to 83 of 98, including three previously blank frames. Five added boxes matched annotated objects; the separate 71 controlled background crops gained one false cue. An extra localization cue is not a drone classification. On the separate 33-frame Drexel pilot, both settings localized zero of 25 drones. The comparison used adjacent source frames when checking weak cues; camera FPS and field distance have not been measured on iPhone 15.

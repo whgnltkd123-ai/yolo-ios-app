@@ -108,10 +108,7 @@ workflows:
         - pattern: fix/small-target-continuity
           include: true
           source: true
-        - pattern: feat/c7-unknown-zoom
-          include: true
-          source: true
-        - pattern: feat/c7-drone-recheck
+        - pattern: feat/c7-first-sighting
           include: true
           source: true
         - pattern: feat/camera-screen-credit
@@ -178,9 +175,9 @@ workflows:
       - name: Verify aerial decisions on iOS Simulator
         script: |
           set -euo pipefail
-          case "$CM_BRANCH" in feat/tracking-evidence-alerts|feat/reinforced-aerial-model|feat/stable-aerial-tracking|feat/native-no-tracking-yolo26s|feat/native-motion-tracking|fix/small-target-continuity|fix/official-bytetrack-native|feat/camera-screen-credit|feat/c7-drone-recheck|feat/c7-unknown-zoom) ;; *) exit 0 ;; esac
-          if [ "$CM_BRANCH" = "feat/c7-unknown-zoom" ]; then
-            xcrun coremlcompiler compile YOLOiOSApp/Models/Detect/yolo26s-aerial3.mlpackage Tests/YOLOTests/Resources/UnknownZoom
+          case "$CM_BRANCH" in feat/tracking-evidence-alerts|feat/reinforced-aerial-model|feat/stable-aerial-tracking|feat/native-no-tracking-yolo26s|feat/native-motion-tracking|fix/small-target-continuity|fix/official-bytetrack-native|feat/camera-screen-credit|feat/c7-first-sighting) ;; *) exit 0 ;; esac
+          if [ "$CM_BRANCH" = "feat/c7-first-sighting" ]; then
+            xcrun coremlcompiler compile YOLOiOSApp/Models/Detect/yolo26s-aerial3.mlpackage Tests/YOLOTests/Resources/FirstSighting
           fi
           IOS_SIMULATOR=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if "iOS" in k for x in v if "iPhone" in x["name"] and x["isAvailable"]))')
           xcodebuild -scheme UltralyticsYOLO -sdk iphonesimulator \

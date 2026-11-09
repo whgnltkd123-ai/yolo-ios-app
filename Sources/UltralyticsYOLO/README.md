@@ -328,10 +328,6 @@ outputs with Swift-side NMS, or `nms=True` for embedded NMS on supported tasks. 
 Neural Engine, GPU and CPU; `useGpu: false` pins it to the CPU. The predictors decode the actual Vision observations and tensor
 layouts of either backend by shape, so existing YOLO11 and YOLO26 assets and both heads remain supported.
 
-## Automatic aerial verification
-
-For the app's three-class c7 Core ML checkpoint, `YOLOView.setDroneRecheck(_:)` enables automatic crop verification on observed unidentified boxes. Only a spatially matched, unambiguous crop result can change that same box. A crop-only drone is capped at suspicion; a normal full-frame decision is required for confirmation.
-
 ## 🤝 Contributing
 
 Contributions are welcome! Whether it's bug reports, feature requests, or code contributions, please feel free to open an issue or submit a pull request on the [GitHub repository](https://github.com/ultralytics/yolo-ios-app). Check the [contributing guide](https://docs.ultralytics.com/help/contributing) for more details on how to get involved. We appreciate your help in making this package better! You can also join the conversation on [Discord](https://discord.com/invite/ultralytics).
