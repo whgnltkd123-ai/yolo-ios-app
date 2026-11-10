@@ -1,0 +1,25 @@
+오픈소스·모델 출처
+
+공중객체 관측은 Ultralytics YOLO iOS 공개 앱의 판정·추적 연결 동작을 Android로 옮긴 프로젝트입니다. Ultralytics 공식 배포 앱 또는 공식 인증 제품이라는 의미가 아닙니다.
+프로젝트 소스: AGPL-3.0. 원저작권 표시와 변경 이력, 빌드·모델 변환 스크립트를 보존합니다.
+원본: https://github.com/ultralytics/yolo-ios-app
+이 앱의 수정 소스: https://github.com/whgnltkd123-ai/yolo-ios-app/tree/feat/android-direct-apk
+현재 개발 초안이며 공개 배포 시 대응 소스와 모델 자료 제공 범위를 최종 확정합니다.
+라이선스: https://www.gnu.org/licenses/agpl-3.0.html
+
+공식 ByteTrack C++: Copyright (c) 2021 Yifu Zhang, MIT License.
+원본: https://github.com/ifzhang/ByteTrack
+Eigen 헤더: MPL-2.0 및 해당 파일의 BSD 고지.
+OpenCV 코어 헤더: Apache-2.0, 기존 고정 버전을 사용합니다.
+ONNX Runtime: Microsoft Corporation, MIT License.
+AndroidX CameraX·Core·Activity: Android Open Source Project, Apache-2.0.
+Kotlin: JetBrains 및 기여자, Apache-2.0.
+라이선스 전문은 앱 assets/licenses와 공개 소스 패키지에 포함됩니다.
+
+모델: 기존 YOLO26s c7 체크포인트에서 Android ONNX 형식으로 변환.
+체크포인트 SHA256: c7df126a039c1edde8d6b3e0c78be99f43e6770913eb1ff201976e2cf2505d26
+학습 출처: Seraphim, COCO2017, Distant Bird Detection(kakitamedia), LAT-BirdDrone, USC-MCL, MBAOD.
+데이터 라이선스는 코드 라이선스와 별개입니다. 현재 모델의 공개 배포 권리 검토가 완료된 상태가 아닙니다. 출처별 조건·불확실성은 공개 배포 검토 기록에 따로 보존합니다.
+
+앱 제작: 중령 김옥전, 소령 최현민, 대위 조휘상.
+위 표기는 앱 통합·제작 표기이며 Ultralytics, ByteTrack 또는 데이터셋의 원저작자를 대체하지 않습니다.
