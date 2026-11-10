@@ -1,0 +1,22 @@
+Android companion application
+
+Why a separate module: this repository's UIKit/Core ML owners cannot compile for Android. The android module ports only their camera integration, same-anchor three-score decision, tracking adapter, alerts and evidence flow. The pinned official ByteTrack C++ source is shared directly, not copied or rewritten. All existing Swift files and iOS model assets remain untouched.
+
+Required: JDK 17, Gradle 8.13, Android SDK platform 36, build-tools, NDK 27.2.12479018, CMake 3.22.1. Set JAVA_HOME, ANDROID_HOME and optionally GRADLE_USER_HOME outside the repository.
+Run python tools/prepare_bytetrack_dependencies.py (pinned archive SHA verification).
+Use the preserved checkpoint only with permission. In an environment containing PyTorch, ultralytics, onnx and onnxruntime:
+  python android/export_model.py /path/to/verified/last.pt
+The exporter uses the shared score-preserving postprocessor and checks the three existing public conversion fixtures. It writes aerial.onnx and model-metadata.json to assets; these generated files are not committed.
+
+From this repository:
+  gradle -p android assembleDebug bundleRelease testDebugUnitTest lintDebug
+Debug APK: android/app/build/outputs/apk/debug/app-debug.apk (development test key).
+Release AAB: android/app/build/outputs/bundle/release/app-release.aab (unsigned until the publisher configures an upload key).
+Neither artifact is evidence of Google Play approval or dataset/model distribution clearance. Read RELEASE_REVIEW.txt before distribution.
+
+Camera preview uses CameraX Preview independently of its KEEP_ONLY_LATEST analysis executor. The detector uses the original c7 one2one head with 640 RGB letterbox input and nine output fields, ONNX Runtime XNNPACK/CPU. Mode 1 skips tracking/GMC. Mode 2 uses official ByteTrack. Mode 3 adds the existing bounded sparse block-flow algorithm with gyro motion gating. Mode changes reset the selected tracker, camera motion state changes do not.
+The analysis view reports measured analysis throughput and processing time, not camera preview FPS. Zoom limits are device dependent. Inference speed, camera rotation/crop mapping, alert audibility and thermal behavior require physical Android testing.
+
+Privacy defaults: no network permission, no advertisements, no account, no cloud backup, evidence OFF, no automatic media-gallery write. Shared/exported copies are controlled by the user's selected destination. Raw private evaluation videos are not packaged.
+
+Corresponding source: this feature branch includes Android code/build scripts and directly referenced ByteTrack/dependency preparation source. Publication must include the finalized source revision, required model resources with appropriate rights, all applicable notices, and reproducible build instructions. Do not publish signing keys, personal datasets, cache folders or credential files.

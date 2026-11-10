@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(aerial_tracker)
+set(CMAKE_CXX_STANDARD 14)
+get_filename_component(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.." ABSOLUTE)
+set(BYTE "${ROOT}/Sources/OfficialByteTrack")
+file(GLOB UPSTREAM "${BYTE}/upstream/src/*.cpp")
+add_library(aerial_tracker SHARED tracker_jni.cpp "${BYTE}/Bridge.cpp" ${UPSTREAM})
+target_include_directories(aerial_tracker PRIVATE "${BYTE}/include" "${BYTE}/upstream/include"
+    "${BYTE}/dependencies/eigen" "${BYTE}/dependencies/opencv")
+target_link_options(aerial_tracker PRIVATE "-Wl,-z,max-page-size=16384")
