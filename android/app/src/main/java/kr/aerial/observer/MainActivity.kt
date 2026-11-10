@@ -22,6 +22,11 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -80,7 +85,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
                 arrayOf("1 · 기존 AI 모델", "2 · 객체 ID 추적", "3 · 움직임 보정 추적"))
             onItemSelectedListener=object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: AdapterView<*>?,view: View?,position: Int,id: Long) { mode=position }
+                override fun onItemSelected(parent: AdapterView<*>?,view: View?,position: Int,id: Long) {
+                    mode=position; gyro=0f; sensors.unregisterListener(this@MainActivity)
+                    if(resumed && mode==2)sensors.registerListener(this@MainActivity,sensors.getDefaultSensor(Sensor.TYPE_GYROSCOPE),SensorManager.SENSOR_DELAY_GAME)
+                }
                 override fun onNothingSelected(parent: AdapterView<*>?) {}
             }
         }
@@ -128,18 +136,17 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         buttons.addView(Button(this).apply { text="갤러리"; setOnClickListener { openGallery() } },LinearLayout.LayoutParams(0,-2,1f))
         buttons.addView(Button(this).apply { text="안내 / 라이선스"; setOnClickListener { showInformation() } },LinearLayout.LayoutParams(0,-2,1f))
         root.addView(buttons); setContentView(root)
-        analysisQueue.execute {
+        lifecycleScope.launch {
             try {
-                detector=AerialDetector(this)
-                runOnUiThread {
-                    status.text="준비 완료 · 카메라 영상은 기기 안에서만 처리"
-                    if(ContextCompat.checkSelfPermission(this,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED) startCamera()
-                    else AlertDialog.Builder(this).setTitle("카메라 사용 안내")
-                        .setMessage("드론·새 관측에 카메라를 사용합니다. 영상은 서버로 전송하지 않습니다. 자동 채증을 켜면 선택한 관측 장면을 앱 내 갤러리에 저장합니다.")
-                        .setPositiveButton("계속") { _,_ -> requestCamera.launch(Manifest.permission.CAMERA) }
-                        .setNegativeButton("취소",null).show()
-                }
-            } catch(e:Exception) { showError("모델을 준비하지 못했습니다",e) }
+                withContext(analysisQueue.asCoroutineDispatcher()) { detector=AerialDetector(this@MainActivity) }
+                status.text="준비 완료 · 카메라 영상은 기기 안에서만 처리"
+                if(ContextCompat.checkSelfPermission(this@MainActivity,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED) startCamera()
+                else AlertDialog.Builder(this@MainActivity).setTitle("카메라 사용 안내")
+                    .setMessage("드론·새 관측에 카메라를 사용합니다. 영상은 서버로 전송하지 않습니다. 자동 채증을 켜면 선택한 관측 장면을 앱 내 갤러리에 저장합니다.")
+                    .setPositiveButton("계속") { _,_ -> requestCamera.launch(Manifest.permission.CAMERA) }
+                    .setNegativeButton("취소",null).show()
+            } catch(e:CancellationException) { throw e }
+            catch(e:Exception) { showError("모델을 준비하지 못했습니다",e) }
         }
     }
 
@@ -276,7 +283,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     }
     private fun toast(text:String) { Toast.makeText(this,text,Toast.LENGTH_SHORT).show() }
     private fun showError(message:String,e:Throwable) { runOnUiThread { if(!isDestroyed) { status.text="$message: ${e.message}"; toast(message) } } }
-    override fun onResume() { super.onResume(); resumed=true; sensors.registerListener(this,sensors.getDefaultSensor(Sensor.TYPE_GYROSCOPE),SensorManager.SENSOR_DELAY_GAME) }
+    override fun onResume() { super.onResume(); resumed=true; if(mode==2)sensors.registerListener(this,sensors.getDefaultSensor(Sensor.TYPE_GYROSCOPE),SensorManager.SENSOR_DELAY_GAME) }
     override fun onPause() { resumed=false; sensors.unregisterListener(this); alarm.stop(); overlay.objects=emptyList(); overlay.invalidate(); super.onPause() }
     override fun onDestroy() {
         provider?.unbindAll(); alarm.close()
@@ -314,12 +321,13 @@ class AerialAlarm(private val context:Context):java.io.Closeable {
     private val vibrator=context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     var enabled=true
     private var level=0
+    private var lastPatternLevel=0
     private var last=0L
     private var scheduled=false
     private var playingUntil=0L
     private val repeatPattern=Runnable { pulse() }
     fun observe(value:Int) {
-        val promoted=value>level
+        val promoted=value>lastPatternLevel
         level=value; last=SystemClock.elapsedRealtime()
         if(!enabled || value==0)return
         if(!scheduled) { scheduled=true; pulse() }
@@ -329,8 +337,9 @@ class AerialAlarm(private val context:Context):java.io.Closeable {
         }
     }
     private fun pulse() {
-        if(!enabled || level==0 || SystemClock.elapsedRealtime()-last>1000) { scheduled=false; return }
+        if(!enabled || level==0 || SystemClock.elapsedRealtime()-last>1000) { scheduled=false; lastPatternLevel=0; return }
         val count=level
+        lastPatternLevel=count
         val sound=when(count){1->ToneGenerator.TONE_PROP_BEEP;2->ToneGenerator.TONE_PROP_ACK;else->ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD}
         playingUntil=SystemClock.elapsedRealtime()+count*260L
         // Complete the observed event's short pattern even if the next AI frame is empty.
@@ -338,6 +347,6 @@ class AerialAlarm(private val context:Context):java.io.Closeable {
         if(count==3)vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0,120,100,120,100,180),-1))
         handler.postDelayed(repeatPattern,when(count){1->5000L;2->3000L;else->2000L})
     }
-    fun stop() { handler.removeCallbacksAndMessages(null); tone.stopTone(); vibrator.cancel(); scheduled=false; level=0 }
+    fun stop() { handler.removeCallbacksAndMessages(null); tone.stopTone(); vibrator.cancel(); scheduled=false; level=0; lastPatternLevel=0 }
     override fun close() { stop(); tone.release() }
 }
